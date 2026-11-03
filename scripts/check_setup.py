@@ -23,9 +23,8 @@ from typing import NamedTuple
 MIN_PY = (3, 10)
 # The yamlreel version this skill needs. The single source of truth: --install, the version check, SKILL.md,
 # README.md (tests/e2e.py asserts both quote VERSION_SPEC) and CI all derive from these two constants.
-# TODO-RELEASE: placeholder until the yamlreel release that ships `story`, --contact-frames, table/array/cta,
-# stagger/count, transition/energy and music styles is out. Set the real range here, then switch CI's
-# YAMLREEL_SPEC to the PyPI pin and update the two doc strings.
+# 0.3.0 is the first release with `story`, --contact-frames, table/array/cta, stagger/count, transition/energy
+# and music styles. Keep the CI pin (YAMLREEL_SPEC) and the two doc strings in sync when this changes.
 MIN_VERSION = (0, 3, 0)
 MAX_EXCLUSIVE = (0, 4, 0)
 VERSION_SPEC = ">=%s,<%d.%d" % (".".join(map(str, MIN_VERSION)), MAX_EXCLUSIVE[0], MAX_EXCLUSIVE[1])

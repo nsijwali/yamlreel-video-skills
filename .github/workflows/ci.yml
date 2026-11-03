@@ -6,9 +6,8 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
-      # TODO-RELEASE: after the yamlreel release is on PyPI, switch to the pin in scripts/check_setup.py
-      # (VERSION_SPEC), e.g. "yamlreel[ffmpeg]>=0.3.0,<0.4".
-      YAMLREEL_SPEC: "yamlreel[ffmpeg] @ git+https://github.com/nsijwali/yamlreel@main"
+      # Keep in sync with VERSION_SPEC in scripts/check_setup.py.
+      YAMLREEL_SPEC: "yamlreel[ffmpeg]>=0.3.0,<0.4"
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
