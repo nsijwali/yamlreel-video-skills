@@ -28,6 +28,6 @@
 
 ## Facts and safety
 - Simplifying is fine, being wrong is not. Tell the user to fact-check before publishing.
-- Code examples use placeholders (`api_key = "YOUR_KEY"` is still flagged by the secret scan: avoid it).
+- Code examples use placeholders (`api_key = "YOUR_KEY"` passes the secret scan; real-looking values and `secret: <value with digits>` do not).
 - `meta.title` (under about 70 chars), `meta.description` (one sentence) and `meta.tags` (no `#`) feed `share-copy.txt`.
 - Keep `music.seed` fixed (for example 7) so re-renders are identical.

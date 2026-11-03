@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 MIN_PY = (3, 10)
 # The yamlreel version this skill needs. The single source of truth: --install, the version check, SKILL.md,
@@ -36,6 +37,31 @@ UPGRADE_MSG = ("this skill needs a yamlreel with `story` and `render --contact-f
 FONTS = ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSansMono.ttf")
 PY_CANDIDATES = ("python3.13", "python3.12", "python3.11", "python3.10", "python3")
 SMOKE_SPEC = "theme: midnight\nformats: [square]\nscenes:\n  - type: title\n    title: Setup check\n    seconds: 1\n"
+# Validated (not rendered) by probe_features: every feature the skill's references rely on that older builds lack.
+PROBE_SPEC = """theme: midnight
+formats: [square]
+music: {style: lofi, seed: 7}
+scenes:
+  - type: table
+    columns: [id, name]
+    rows:
+      - [1, Ada]
+      - [2, Lin]
+    stagger: 0.4
+    energy: mid
+    transition: fade
+    seconds: 3
+  - type: array
+    items: [a, b]
+    steps:
+      - {at: 1.0, push: c}
+    seconds: 3
+  - type: cta
+    question: Which one?
+    answers: [A, B]
+    transition: slide
+    seconds: 3
+"""
 
 
 def default_venv() -> Path:
@@ -46,16 +72,37 @@ def venv_bin(venv: Path, name: str) -> Path:
     return venv / ("Scripts" if os.name == "nt" else "bin") / name
 
 
-def find_yamlreel() -> "str | None":
-    """$YAMLREEL_BIN, then PATH, then the skill venv."""
+def candidates() -> "list[str]":
+    """Existing yamlreel binaries in priority order: $YAMLREEL_BIN, the skill venv, then PATH."""
+    found: "list[str]" = []
     env = os.environ.get("YAMLREEL_BIN")
-    if env:
-        return env if Path(env).exists() else None
+    paths = [env] if env else []
+    paths.append(str(venv_bin(default_venv(), "yamlreel")))
     on_path = shutil.which("yamlreel")
     if on_path:
-        return on_path
-    cand = venv_bin(default_venv(), "yamlreel")
-    return str(cand) if cand.exists() else None
+        paths.append(on_path)
+    for c in paths:
+        if c not in found and Path(c).exists():
+            found.append(c)
+    return found
+
+
+def find_yamlreel() -> "str | None":
+    """The first candidate that is a usable yamlreel (right version, has the features); others are skipped.
+
+    render.py and check_setup.py both call this, so the binary the setup check approves is the one that renders.
+    """
+    for c in candidates():
+        if assess(c).usable:
+            return c
+    return None
+
+
+def same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return a == b
 
 
 def find_python() -> "str | None":
@@ -135,7 +182,56 @@ def probe_features(ym: str) -> "tuple[bool, str]":
         missing.append("`render --contact-frames`")
     if missing:
         return False, "missing %s" % " and ".join(missing)
-    return True, "`story` and `render --contact-frames` present"
+    with tempfile.TemporaryDirectory(prefix="yamlreel-probe-") as tmp:
+        spec = Path(tmp) / "probe.yaml"
+        spec.write_text(PROBE_SPEC, encoding="utf-8")
+        try:
+            v = subprocess.run([ym, "validate", str(spec)], capture_output=True, text=True, timeout=60, cwd=tmp)
+        except (OSError, subprocess.SubprocessError) as e:
+            return False, "cannot probe %s: %s" % (ym, e)
+    if v.returncode != 0:
+        lines = (v.stderr or v.stdout).strip().splitlines()
+        return False, "cannot validate a spec using table, array, cta, stagger, transition, energy and music lofi: %s" % (
+            lines[-1] if lines else "exit %d" % v.returncode)
+    return True, "`story`, `render --contact-frames` and the newer scene types present"
+
+
+class Assessment(NamedTuple):
+    usable: bool
+    runs: bool
+    text: str
+    feat_ok: bool
+    feat_detail: str
+    unreleased: bool
+    error: str
+
+
+def assess(ym: str) -> Assessment:
+    """Version in range (or an unreleased build older than MIN_VERSION that has the features) and features present."""
+    try:
+        r = subprocess.run([ym, "--version"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return Assessment(False, False, "", False, "version unknown", False, "cannot run %s: %s" % (ym, e))
+    text = (r.stdout + r.stderr).strip()
+    ver = parse_version(text)
+    runs = r.returncode == 0 and ver is not None
+    if not runs:
+        return Assessment(False, False, text, False, "version unknown", False, "")
+    in_range = MIN_VERSION <= ver < MAX_EXCLUSIVE
+    feat_ok, feat_detail = probe_features(ym)
+    # Features are what matter: a main-branch build that still reports an older number but has them passes.
+    unreleased = feat_ok and ver < MIN_VERSION
+    return Assessment(feat_ok and (in_range or unreleased), True, text, feat_ok, feat_detail, unreleased, "")
+
+
+def resolution_check(ym: str) -> "dict | None":
+    """Fail when render.py (find_yamlreel) would run a different binary than the one just approved."""
+    resolved = find_yamlreel()
+    if resolved and same_file(resolved, ym):
+        return None
+    return check("resolution", False,
+                 "checked %s but render.py would run %s" % (ym, resolved or "nothing"),
+                 "unset $YAMLREEL_BIN or point it at the checked binary (order: $YAMLREEL_BIN, skill venv, PATH)")
 
 
 def downgrade_when_smoke_passes(checks: "list[dict]") -> None:
@@ -156,32 +252,26 @@ def run_checks(preferred: "str | None" = None) -> "tuple[list[dict], str | None]
     checks.append(check("python", py is not None, py or "no Python >= 3.10 found on PATH",
                         "brew install python@3.12   (macOS) or sudo apt install python3 python3-venv   (Debian/Ubuntu)"))
     venv = default_venv()
-    ym = preferred or find_yamlreel()
+    # When nothing is usable, still diagnose the first binary found so the failing check explains why.
+    ym = preferred or find_yamlreel() or next(iter(candidates()), None)
     install_fix = "python3 scripts/check_setup.py --install"
     checks.append(check("venv", venv.is_dir() or (ym is not None and shutil.which("yamlreel") == ym) or bool(os.environ.get("YAMLREEL_BIN")),
                         str(venv) if venv.is_dir() else "no skill venv (fine if yamlreel is on PATH or YAMLREEL_BIN is set)",
                         install_fix))
     usable = False
     if ym:
-        try:
-            r = subprocess.run([ym, "--version"], capture_output=True, text=True, timeout=60)
-            text = (r.stdout + r.stderr).strip()
-            ver = parse_version(text)
-            runs = r.returncode == 0 and ver is not None
-            in_range = runs and MIN_VERSION <= ver < MAX_EXCLUSIVE
-            feat_ok, feat_detail = probe_features(ym) if runs else (False, "version unknown")
-            checks.append(check("features", feat_ok, feat_detail, UPGRADE_MSG))
-            # Features are what matter: a main-branch build that still reports an older number but has them passes.
-            unreleased = runs and feat_ok and ver < MIN_VERSION
-            usable = feat_ok and (in_range or unreleased)
-            detail = "%s at %s" % (text or "unknown version", ym)
-            if unreleased:
+        a = assess(ym)
+        usable = a.usable
+        if a.error:
+            checks.append(check("yamlreel", False, a.error, install_fix))
+        else:
+            checks.append(check("features", a.feat_ok, a.feat_detail, UPGRADE_MSG))
+            detail = "%s at %s" % (a.text or "unknown version", ym)
+            if a.unreleased:
                 detail += " (unreleased build: older than %s but has the required features)" % VERSION_SPEC
             checks.append(check("yamlreel", usable, detail, UPGRADE_MSG + "   or: " + install_fix))
-        except (OSError, subprocess.SubprocessError) as e:
-            checks.append(check("yamlreel", False, "cannot run %s: %s" % (ym, e), install_fix))
     else:
-        checks.append(check("yamlreel", False, "yamlreel not found (looked at $YAMLREEL_BIN, PATH, %s)" % venv_bin(venv, "yamlreel"), install_fix))
+        checks.append(check("yamlreel", False, "no usable yamlreel found (looked at $YAMLREEL_BIN, %s, PATH)" % venv_bin(venv, "yamlreel"), install_fix))
 
     ff = shutil.which("ffmpeg") or (venv_ffmpeg(ym) if ym else None)
     checks.append(check("ffmpeg", ff is not None, ff or "ffmpeg not found",
@@ -191,6 +281,9 @@ def run_checks(preferred: "str | None" = None) -> "tuple[list[dict], str | None]
                         font_fix() + "   (the skill never installs fonts itself)"))
     if ym and usable:
         checks.append(smoke_render(ym))
+        mismatch = resolution_check(ym)
+        if mismatch:
+            checks.append(mismatch)
     else:
         checks.append(check("smoke-render", False, "skipped: yamlreel is not usable", install_fix))
     downgrade_when_smoke_passes(checks)
@@ -243,9 +336,16 @@ def install(log) -> "tuple[int, str | None]":
         log("fail python: no Python >= 3.10 found [fix: brew install python@3.12 or sudo apt install python3 python3-venv]")
         return 1, None
     venv = default_venv()
-    requirement = os.environ.get(SPEC_ENV) or PIN
+    override = os.environ.get(SPEC_ENV)
+    requirement = override or PIN
+    if override:
+        log("%s is set: installing %r instead of the pinned %r" % (SPEC_ENV, override, PIN))
     try:
         if venv_bin(venv, "python").exists() and not venv_python_ok(venv):
+            if venv != Path.home() / ".yamlreel" / "venv":
+                log("install failed: %s has an old Python and is not the default skill venv (%s); "
+                    "not recreating it. Move it away or unset YAMLREEL_VENV." % (venv, Path.home() / ".yamlreel" / "venv"))
+                return 1, None
             if (venv / "pyvenv.cfg").is_file():
                 log("venv %s uses Python < 3.10; recreating it" % venv)
                 shutil.rmtree(str(venv))

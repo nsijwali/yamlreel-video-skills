@@ -22,7 +22,7 @@ macOS + Linux; deterministic outputs (fixed music `seed`); SKILL.md stays short 
   64 chars, and must match the install directory; `description` at most 1024 chars. Claude Code loads it from
   `~/.claude/skills/<name>/` or `.claude/skills/<name>/`.
 - MCP Market submission is the public repo URL. Assumed: it detects `SKILL.md` at repo root. Confirm before submitting.
-- yamlreel facts relied on (from its README and `yamlreel/cli.py`, v0.2.2): commands `init`, `story`, `validate`,
+- yamlreel facts relied on (from its README and `yamlreel/cli.py`; the required range is `VERSION_SPEC` in `scripts/check_setup.py`, currently `>=0.3.0,<0.4`, with unreleased builds accepted when `check_setup.probe_features` passes): commands `init`, `story`, `validate`,
   `render`; flags `--preview` (half size, 12 fps), `--no-voice`, `--out`, `--format`, `--contact-frames 1-8`,
   `--voice-url`, `--music`; `render` exits 0 even with warnings, prints `  <fmt>: <path> (<s>s, WxH)` to stdout,
   `  warning: ...` lines and `error: ...` (exit 1) to stderr, and `share copy: <path>`; `story` refuses to overwrite
@@ -74,11 +74,11 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
 4. `yamlreel story videos/<slug>/outline.yaml --out videos/<slug>/spec.yaml --format <fmt> --theme <t>`.
 5. Edit: replace every `TODO`, set `meta.title/description/tags`, `formats`, `music.seed`; on-screen text short,
    narration explains (never duplicates) the screen. Consult `references/scene-types.md` for fields.
-6. `scripts/render.py videos/<slug>/spec.yaml --stage preview`. On error, fix using the message (unknown-field errors
+6. `python3 <skill>/scripts/render.py videos/<slug>/spec.yaml --stage preview` (run from the project folder). On error, fix using the message (unknown-field errors
    list allowed keys) and `references/troubleshooting.md`; retry at most 3 times, then report to the user.
 7. Open every printed `contact.png` with the image viewer tool. Check: no overlap, no clipped or shrunk text, reveals
    progress across stills, hook readable in the first still. Fix the spec and repeat step 6 until clean, max 3 loops.
-8. `scripts/render.py videos/<slug>/spec.yaml --stage final`.
+8. `python3 <skill>/scripts/render.py videos/<slug>/spec.yaml --stage final` (run from the project folder).
 9. Report: paths to each `video.mp4`, `poster.jpg`, `contact.png`, and paste `share-copy.txt` contents. Remind the user to
    fact-check anything simplified.
 
@@ -100,9 +100,12 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
   [--voice-url URL] [--allow-warnings]`. Default stage `all`; default out `<spec folder>/out`, with
   `preview/` and `final/` subfolders so the preview never overwrites the final.
 - Preflight (exit 2 on refusal, message says why): spec and out dir resolve inside the current working directory
-  (or the skill's `examples/`); spec has no `TODO` outside comments; secret scan (regexes for `AKIA[0-9A-Z]{16}`,
-  `sk-[A-Za-z0-9]{20,}`, `ghp_|github_pat_`, `xox[bap]-`, `-----BEGIN`, `password|secret|api[_-]?key\s*[:=]`);
-  `--voice-url` host must be `127.0.0.1`, `localhost` or `::1` over http(s). Without `--voice-url` every render gets
+  (or the skill's `examples/`); spec has no `TODO` outside comments; secret scan (`find_secret` in render.py: provider
+  key prefixes such as `AKIA...`, `sk-`, `ghp_`, `xox`/`xapp-`, `hf_`, `npm_`, `SG.`, JWTs, `-----BEGIN`, Bearer tokens,
+  URL passwords, and keyword assignments `password|passwd|pwd|secret|token|api_key|private_key|access_key|auth` followed
+  by `:`/`=` and a value, with plain, escaped or doubled quotes; obvious placeholders such as `YOUR_KEY`, `<...>`, `xxx`,
+  `${VAR}` are exempt and hyphenated prose like `secret: rate-limiting` is not flagged);
+  `--voice-url` host must be `127.0.0.1`, `localhost` or `::1` over http(s) and must not contain `user:password@`. Without `--voice-url` every render gets
   `--no-voice`, so a remote `voice_server` in the user config is never used by the skill.
 - Steps: `yamlreel validate SPEC` (print its `ok:` line) -> `yamlreel render SPEC --preview --out OUT/preview
   --contact-frames N(default 3)` -> check each format's `contact.png` exists, has a PNG signature and nonzero IHDR size
@@ -110,7 +113,8 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
 - Never passes `--allow-path`, `--allow-private-hosts` or `--read-screen`.
 - Output: human lines, then one final line `RESULT {json}` with `stage, ok, warnings[], formats{fmt: {video, poster,
   contact, seconds, size}}, share_copy`. Parses yamlreel stdout lines; paths are absolute.
-- Exit codes: 0 ok, 1 yamlreel error (its stderr is echoed), 2 preflight refused, 3 warnings block final.
+- Exit codes: 0 ok, 1 yamlreel error (its stderr is echoed, URL credentials scrubbed), 2 preflight refused, 3 warnings
+  block final, 4 usage error.
 - Appends every command, exit code and stderr to `OUT/render-log.txt`.
 
 ### 3.6 Safety rules (in SKILL.md, enforced where possible by render.py)
@@ -157,9 +161,11 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
   exits 0 with zero warnings; every format folder has `video.mp4` (> 50 KB), `poster.jpg`, `contact.png`; RESULT
   `seconds` within 10% of the spec's summed `seconds`; `share-copy.txt` contains `meta.title`.
 - Every fenced `yaml` block in `references/scene-types.md` passes `yamlreel validate` when wrapped as a one-scene spec.
-- render.py preflight unit cases: spec outside cwd -> 2; `TODO` in spec -> 2; `sk-...` string -> 2; `--voice-url
-  https://api.example.com/mcp/` -> 2; `--voice-url http://127.0.0.1:3900/mcp/` passes preflight; warning fixture -> 3.
-- check_setup.py: passes on a configured Mac; with `YAMLREEL_FONT_DIR` empty and fonts hidden it reports the font fix.
+- render.py preflight unit cases: spec outside cwd -> 2; `TODO` in spec -> 2; secret strings (see `tests/e2e.py` `secret_cases`) -> 2; placeholders -> pass; `--voice-url
+  https://api.example.com/mcp/` or any URL with userinfo -> 2; `--voice-url http://127.0.0.1:3900/mcp/` passes preflight; warning fixture -> 3.
+- check_setup.py: passes on a configured Mac; `find_yamlreel` skips binaries that fail the version/feature probe (order:
+  `$YAMLREEL_BIN`, skill venv, PATH) and check_setup fails if it approved a different binary than render.py would run;
+  an empty `YAMLREEL_FONT_DIR` adds nothing and the smoke render stays authoritative.
 - Repo hygiene grep: no `profile id`, no personal paths (`/Users/`), no author watermark, no `.wav` files.
 - Frontmatter: `name` matches `^[a-z0-9-]{1,64}$`, description <= 1024 chars.
 - Manual macOS end to end (acceptance): fresh shell, `check_setup.py --install`, then a full (non-preview) render of

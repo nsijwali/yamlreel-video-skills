@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,8 +32,13 @@ FAILURES: "list[str]" = []
 
 
 def run(args: "list[str]", cwd: Path, env: "dict | None" = None) -> subprocess.CompletedProcess:
+    """Run python on args. An env value of None removes that variable."""
     full_env = dict(os.environ)
-    full_env.update(env or {})
+    for k, v in (env or {}).items():
+        if v is None:
+            full_env.pop(k, None)
+        else:
+            full_env[k] = v
     return subprocess.run([sys.executable, *args], cwd=str(cwd), capture_output=True, text=True, env=full_env)
 
 
@@ -40,6 +46,47 @@ def result_of(proc: subprocess.CompletedProcess) -> dict:
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")]
     assert lines, "no RESULT line in stdout:\n%s\n%s" % (proc.stdout, proc.stderr)
     return json.loads(lines[-1][len("RESULT "):])
+
+
+@contextmanager
+def patched_env(**changes):
+    """Temporarily set (or with None remove) environment variables in this process."""
+    old = {k: os.environ.get(k) for k in changes}
+    for k, v in changes.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def fake_yamlreel(path: Path, version: str = "0.3.1", story: bool = True, contact: bool = True, validate: bool = True,
+                  slow: bool = False) -> Path:
+    """A shell stand-in for yamlreel. slow=True makes real validate/render calls sleep (probe calls still pass)."""
+    lines = ["#!/bin/sh", 'case "$1" in']
+    lines.append('  --version) echo "%s";;' % version)
+    lines.append("  story) exit %d;;" % (0 if story else 2))
+    lines.append('  render) if [ "$2" = "--help" ]; then echo "usage: render %s"; exit 0; fi' % ("--contact-frames" if contact else ""))
+    lines.append("    sleep 30;;" if slow else "    exit 1;;")
+    lines.append('  validate) case "$2" in *yamlreel-probe-*) exit %d;; esac' % (0 if validate else 1))
+    lines.append("    sleep 30;;" if slow else "    exit 0;;")
+    lines.append("esac")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def path_without_yamlreel() -> str:
+    """$PATH minus every folder that holds a yamlreel executable."""
+    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not (Path(d) / "yamlreel").exists()]
+    return os.pathsep.join(keep)
 
 
 def case(fn):
@@ -137,8 +184,23 @@ def secret_cases() -> "list[tuple[str, str]]":
         ("private key", "-----BEGIN " + "RSA PRIVATE KEY-----"),
         ("password assignment", "password: hunter2xyz"),
         ("token assignment", "token = abc123def456"),
-        ("api key assignment", "api_key: \"YOUR_KEY\""),
+        ("api key assignment", "api_key: \"" + "k3y" * 4 + "\""),
         ("secret assignment", "secret: s3cr3t-value"),
+        ("django SECRET_KEY", "SECRET_KEY = 'django-insecure-x9k2m4p7q1'"),
+        ("AWS_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY=" + "wJalrXUtnFEMI/K7MDENG/bPxRfiCY"),
+        ("bearer", "Authorization: Bearer " + "abcdef0123456789abcdef"),
+        ("DATABASE_URL with creds", "DATABASE_URL=postgres://admin:s3cr3tpw@db.internal:5432/app"),
+        ("escaped quotes", 'password: \\"hunter2xyz\\"'),
+        ("single quotes (doubled once embedded in YAML)", "password: 'hunter2xyz'"),
+        ("OPENAI_API_KEY", "OPENAI_API_KEY=" + "abc123def456ghi789"),
+        ("pwd", "pwd=hunter2"),
+        ("auth", "auth: x9f8a7b6c5d4"),
+        ("short password", "password: hunter2"),
+        ("stripe test", "sk_test_" + "a1" * 6),
+        ("huggingface", "hf_" + "aB3" * 11),
+        ("npm", "npm_" + "aB3" * 12),
+        ("slack app", "xapp-1-A0123"),
+        ("sendgrid", "SG." + "a" * 22 + "." + "b" * 22),
     ]
 
 
@@ -181,22 +243,42 @@ def test_secret_patterns() -> None:
 
 
 @case
+def test_secret_find_secret_direct() -> None:
+    for label, secret in secret_cases():
+        assert render_mod.find_secret(secret), "%s not flagged: %r" % (label, secret)
+    doubled = "subtitle: 'password: " + "''hunter2xyz''" + "'"
+    assert render_mod.find_secret(doubled), "doubled single quotes"
+    for text in ("api_key: \"YOUR_KEY\"", "api_key = <your key>", "token: xxx", "password: ...", "password: ${DB_PASSWORD}",
+                 "password: $DB_PASSWORD", "SECRET_KEY=MY_SECRET_NAME", "Authorization: Bearer YOUR_TOKEN_HERE_PLEASE",
+                 "DATABASE_URL=postgres://user:${DB_PASS}@db/app", "DATABASE_URL=postgres://user:<password>@db/app",
+                 "api_key: ****", "http://localhost:8080/path@x"):
+        assert not render_mod.find_secret(text), "placeholder flagged: %r" % text
+
+
+@case
 def test_secret_prose_not_flagged() -> None:
     prose = ["The token: refresh it", "Never share your secret: keep it safe", "disk-based caching of the layer-cache-key-x",
-             "a password manager", "tokens: reused", "api key rotation: monthly", "sk-short"]
-    for text in prose:
-        try:
-            render_mod.preflight(Path(tmp_spec(text)), Path("out"), None, Path.cwd())
-        except render_mod.Refused as e:
-            if "secret" in str(e):
-                raise AssertionError("prose %r flagged: %s" % (text, e))
+             "a password manager", "tokens: reused", "api key rotation: monthly", "sk-short", "secret: rate-limiting",
+             "Secret: hyphen-ated words are prose", "Bearer authentication", "the auth: layer", "token: refresh_flow"]
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        for i, text in enumerate(prose):
+            spec = proj_p / ("prose%d.yaml" % i)
+            spec.write_text(GOOD_SPEC.replace("Hello", text.replace('"', "'")), encoding="utf-8")
+            try:
+                render_mod.preflight(spec, proj_p / "out", None, proj_p)  # must pass: no exception at all
+            except render_mod.Refused as e:
+                raise AssertionError("prose %r refused: %s" % (text, e))
 
 
-def tmp_spec(text: str) -> str:
-    d = tempfile.mkdtemp(prefix="yamlreel-prose-")
-    p = Path(d) / "s.yaml"
-    p.write_text(GOOD_SPEC.replace("Hello", text.replace('"', "'")), encoding="utf-8")
-    return str(p)
+@case
+def test_placeholder_spec_passes() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        p = proj_p / "ph.yaml"
+        p.write_text(GOOD_SPEC.replace("title: Hello", "title: Hello\n    subtitle: 'api_key = \"YOUR_KEY\"'"), encoding="utf-8")
+        r = run([str(RENDER), str(p), "--stage", "preview"], proj_p)
+        assert r.returncode == 0, "placeholder must pass: %d\n%s" % (r.returncode, r.stderr)
 
 
 @case
@@ -263,19 +345,22 @@ def test_subprocess_failures() -> None:
     with tempfile.TemporaryDirectory() as proj:
         proj_p = Path(proj).resolve()
         (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
-        slow = proj_p / "slow.sh"
-        slow.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
-        slow.chmod(0o755)
+        slow = fake_yamlreel(proj_p / "slow.sh", slow=True)
         r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p,
-                env={"YAMLREEL_BIN": str(slow), "YAMLREEL_RENDER_TIMEOUT": "1"})
+                env={"YAMLREEL_BIN": str(slow), "YAMLREEL_RENDER_TIMEOUT": "2"})
         assert r.returncode == 1 and "timed out" in r.stderr, (r.returncode, r.stderr)
         assert result_of(r)["ok"] is False
         noexec = proj_p / "noexec"
         noexec.write_text("x", encoding="utf-8")
         noexec.chmod(0o644)
-        r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p, env={"YAMLREEL_BIN": str(noexec)})
-        assert r.returncode == 1 and "cannot run yamlreel" in r.stderr, (r.returncode, r.stderr)
+        # find_yamlreel skips a binary it cannot run, so the CLI reports "not found" ...
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p,
+                env={"YAMLREEL_BIN": str(noexec), "YAMLREEL_VENV": str(proj_p / "novenv"), "PATH": path_without_yamlreel()})
+        assert r.returncode == 1 and "yamlreel not found" in r.stderr, (r.returncode, r.stderr)
         assert result_of(r)["ok"] is False
+        # ... and run_yamlreel itself turns an OS error into a failed process.
+        done = render_mod.run_yamlreel([str(noexec), "validate", "x"], render_mod.Logger(None))
+        assert done.returncode == 1 and "cannot run yamlreel" in done.stderr, done
         (proj_p / "afile").write_text("x", encoding="utf-8")
         r = run([str(RENDER), "good.yaml", "--stage", "preview", "--out", "afile/sub"], proj_p)
         assert r.returncode == 1 and "cannot create output folder" in r.stderr, (r.returncode, r.stderr)
@@ -283,24 +368,38 @@ def test_subprocess_failures() -> None:
 
 
 @case
+def test_timeout_env_fallback() -> None:
+    for value, expected in (("1", 3600), ("0", 3600), ("-5", 3600), ("abc", 3600), ("", 3600), ("2", 2), ("90", 90)):
+        with patched_env(YAMLREEL_RENDER_TIMEOUT=value):
+            assert render_mod.timeout_for(3600) == expected, (value, render_mod.timeout_for(3600))
+    with patched_env(YAMLREEL_RENDER_TIMEOUT=None):
+        assert render_mod.timeout_for(120) == 120
+
+
+NARRATED_SPEC = GOOD_SPEC.replace("    seconds: 1\n", "    seconds: 1\n    narration: Hello there.\n")
+
+
+@case
 def test_voice_url() -> None:
     with tempfile.TemporaryDirectory() as proj:
         proj_p = Path(proj).resolve()
-        (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        (proj_p / "narrated.yaml").write_text(NARRATED_SPEC, encoding="utf-8")
         for bad in ("http://127.0.0.1@evil.example.com/mcp/", "http://evil.example.com\\@127.0.0.1/mcp/",
                     "http://localhost.evil.example.com/mcp/", "http://127.0.0.1:99999/mcp/",
-                    "http://127.0.0.1/ x", "ftp://127.0.0.1/mcp/", "http://u:hunter2pw@evil.example.com/mcp/"):
-            r = run([str(RENDER), "good.yaml", "--stage", "preview", "--voice-url", bad], proj_p)
+                    "http://127.0.0.1/ x", "ftp://127.0.0.1/mcp/", "http://u:hunter2pw@evil.example.com/mcp/",
+                    "http://alice:hunter2pw@127.0.0.1:9/mcp/", "http://alice@127.0.0.1:9/mcp/",
+                    "http://:hunter2pw@localhost:9/mcp/", "https://alice:hunter2pw@[::1]:9/mcp/"):
+            r = run([str(RENDER), "narrated.yaml", "--stage", "preview", "--voice-url", bad], proj_p)
             assert r.returncode == 2, "%r: expected 2, got %d\n%s" % (bad, r.returncode, r.stderr)
-            assert "hunter2pw" not in r.stderr + r.stdout, "password leaked in refusal"
-        # A local URL with credentials passes preflight (nothing is listening, so yamlreel exits 1),
-        # and neither the log nor the output may hold the password.
-        url = "http://alice:hunter2pw@127.0.0.1:9/mcp/"
-        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--voice-url", url], proj_p)
-        assert r.returncode in (0, 1), "local voice url must pass preflight (got %d)\n%s" % (r.returncode, r.stderr)
-        log = (proj_p / "out" / "render-log.txt").read_text(encoding="utf-8")
-        assert "--voice-url" in log and "hunter2pw" not in log and "alice" not in log, log
-        assert "hunter2pw" not in r.stdout + r.stderr
+            everything = r.stderr + r.stdout
+            assert "hunter2pw" not in everything and "alice" not in everything, "credentials leaked: %s" % everything
+            assert result_of(r)["ok"] is False
+        assert not (proj_p / "out").exists(), "a refused voice url must not create output or a log"
+        r = run([str(RENDER), "narrated.yaml", "--stage", "preview", "--voice-url", "http://127.0.0.1:9/mcp/"], proj_p)
+        assert r.returncode in (0, 1), "local voice url without credentials must pass preflight (got %d)\n%s" % (
+            r.returncode, r.stderr)
+        assert render_mod.scrub("boom http://alice:hunter2pw@host/x") == "boom http://***@host/x"
+        assert "hunter2pw" not in render_mod.result_line("x", False, ["http://alice:hunter2pw@host/x"], {}, None)
 
 
 @case
@@ -375,21 +474,102 @@ def test_install_json_stdout_is_pure_json() -> None:
 @case
 def test_feature_probe_and_version() -> None:
     with tempfile.TemporaryDirectory() as d:
-        old = Path(d) / "yamlreel"
-        old.write_text("#!/bin/sh\n"
-                       'case "$1" in --version) echo "yamlreel 0.2.2";; story) exit 2;; render) echo "usage: render";; esac\n',
-                       encoding="utf-8")
-        old.chmod(0o755)
+        dp = Path(d).resolve()
+        old = fake_yamlreel(dp / "yamlreel", version="yamlreel 0.2.2", story=False, contact=False)
         ok, detail = check_setup.probe_features(str(old))
         assert not ok and "story" in detail and "--contact-frames" in detail, detail
-        r = run([str(CHECK), "--json"], ROOT, env={"YAMLREEL_BIN": str(old)})
+        empty_venv = str(dp / "novenv")
+        r = run([str(CHECK), "--json"], ROOT, env={"YAMLREEL_BIN": str(old), "YAMLREEL_VENV": empty_venv,
+                                                    "PATH": path_without_yamlreel()})
         data = json.loads(r.stdout)
         assert r.returncode == 1 and not data["ok"], r.stdout
         feat = [c for c in data["checks"] if c["name"] == "features"][0]
         assert not feat["ok"] and "upgrade yamlreel" in feat["fix"], feat
-        link = Path(d) / "link-to-yamlreel"
+        link = dp / "link-to-yamlreel"
         link.symlink_to(Path(YAMLREEL).resolve() if YAMLREEL else old)
         assert check_setup.probe_features(str(link))[0] or not YAMLREEL
+        # validate is part of the probe: help text alone is not enough
+        nov = fake_yamlreel(dp / "novalidate", validate=False)
+        ok, detail = check_setup.probe_features(str(nov))
+        assert not ok and "validate" in detail, detail
+
+
+@case
+def test_assess_unreleased_build_branch() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d).resolve()
+        a = check_setup.assess(str(fake_yamlreel(dp / "a", version="yamlreel 0.2.2")))
+        assert a.usable and a.unreleased and a.feat_ok, a  # older number, has the features: passes
+        a = check_setup.assess(str(fake_yamlreel(dp / "b", version="yamlreel 0.3.5")))
+        assert a.usable and not a.unreleased, a
+        a = check_setup.assess(str(fake_yamlreel(dp / "c", version="yamlreel 0.4.0")))
+        assert not a.usable and a.feat_ok, a  # features but out of range
+        a = check_setup.assess(str(fake_yamlreel(dp / "d", version="yamlreel 0.3.0", story=False)))
+        assert not a.usable and not a.feat_ok and not a.unreleased, a
+        a = check_setup.assess(str(fake_yamlreel(dp / "e", version="yamlreel 0.2.2", story=False)))
+        assert not a.usable and not a.unreleased, a  # old number and no features
+        a = check_setup.assess(str(fake_yamlreel(dp / "f", version="no version here")))
+        assert not a.usable and not a.runs, a
+        a = check_setup.assess(str(dp / "does-not-exist"))
+        assert not a.usable and a.error, a
+
+
+@case
+def test_find_yamlreel_skips_unusable_and_orders() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d).resolve()
+        bad_dir, good_dir, other_dir = dp / "badbin", dp / "venv" / "bin", dp / "otherbin"
+        for x in (bad_dir, good_dir, other_dir):
+            x.mkdir(parents=True)
+        bad = fake_yamlreel(bad_dir / "yamlreel", version="yamlreel 0.2.2", story=False, contact=False)
+        good = fake_yamlreel(good_dir / "yamlreel")
+        other = fake_yamlreel(other_dir / "yamlreel", version="yamlreel 0.3.2")
+        path = os.pathsep.join([str(bad_dir), path_without_yamlreel()])
+        # old yamlreel on PATH, good one in the skill venv: the venv wins and check_setup approves exactly that binary
+        with patched_env(YAMLREEL_BIN=None, YAMLREEL_VENV=str(dp / "venv"), PATH=path):
+            assert check_setup.find_yamlreel() == str(good), check_setup.find_yamlreel()
+            assert check_setup.resolution_check(str(good)) is None
+            mismatch = check_setup.resolution_check(str(bad))
+            assert mismatch and not mismatch["ok"] and "would run" in mismatch["detail"], mismatch
+        # an unusable $YAMLREEL_BIN falls through to the venv
+        with patched_env(YAMLREEL_BIN=str(bad), YAMLREEL_VENV=str(dp / "venv"), PATH=path):
+            assert check_setup.find_yamlreel() == str(good)
+        # a usable $YAMLREEL_BIN wins over the venv; the venv binary then fails the resolution check
+        with patched_env(YAMLREEL_BIN=str(other), YAMLREEL_VENV=str(dp / "venv"), PATH=path):
+            assert check_setup.find_yamlreel() == str(other)
+            mismatch = check_setup.resolution_check(str(good))
+            assert mismatch and not mismatch["ok"] and str(other) in mismatch["detail"], mismatch
+        # PATH is the last resort
+        with patched_env(YAMLREEL_BIN=None, YAMLREEL_VENV=str(dp / "novenv"), PATH=os.pathsep.join([str(other_dir), path_without_yamlreel()])):
+            assert check_setup.find_yamlreel() == str(other)
+        with patched_env(YAMLREEL_BIN=None, YAMLREEL_VENV=str(dp / "novenv"), PATH=path):
+            assert check_setup.find_yamlreel() is None
+        # the CLI: with only an old yamlreel around, render.py says so
+        (dp / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], dp,
+                env={"YAMLREEL_BIN": None, "YAMLREEL_VENV": str(dp / "novenv"), "PATH": path})
+        assert r.returncode == 1 and "yamlreel not found" in r.stderr, (r.returncode, r.stderr)
+
+
+@case
+def test_install_guards() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d).resolve()
+        # a non-default venv whose python is too old is never deleted
+        venv = dp / "custom-venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("home = /nowhere\n", encoding="utf-8")
+        py = venv / "bin" / "python"
+        py.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        py.chmod(0o755)
+        r = run([str(CHECK), "--install", "--json"], ROOT, env={"YAMLREEL_VENV": str(venv)})
+        assert r.returncode == 1 and "not the default skill venv" in r.stderr, (r.returncode, r.stderr)
+        assert (venv / "pyvenv.cfg").is_file() and py.is_file(), "custom venv must not be removed"
+        json.loads(r.stdout)
+        # the override of the pin is announced
+        env = {"YAMLREEL_VENV": str(dp / "v2"), "YAMLREEL_SPEC": str(dp / "no-such-package-dir")}
+        r = run([str(CHECK), "--install", "--json"], ROOT, env=env)
+        assert "YAMLREEL_SPEC is set" in r.stderr and "instead of the pinned" in r.stderr, r.stderr
 
 
 def spec_seconds(text: str) -> float:
@@ -433,27 +613,32 @@ def main() -> int:
     test_scene_snippets()
     test_preflight()
     test_secret_patterns()
+    test_secret_find_secret_direct()
     test_secret_prose_not_flagged()
+    test_placeholder_spec_passes()
     test_path_escapes()
     test_refuses_home_and_root()
     test_usage_errors()
     test_default_out_is_next_to_spec()
     test_subprocess_failures()
+    test_timeout_env_fallback()
     test_voice_url()
     test_warning_blocks_final()
     test_check_setup()
     test_check_setup_units()
     test_feature_probe_and_version()
+    test_assess_unreleased_build_branch()
+    test_find_yamlreel_skips_unusable_and_orders()
+    test_install_guards()
     test_install_json_stdout_is_pure_json()
     for ex in sorted((ROOT / "examples").glob("*.yaml")):
         name = "example_%s" % ex.stem
 
-        @case
-        def run_example(ex=ex):
+        def run_example(ex: Path = ex) -> None:
             example_test(ex, args.preview)
-        run_example.__name__ = name
+        run_example.__name__ = name  # set before @case wraps it so PASS/FAIL lines carry the example name
         print("-- %s" % name)
-        run_example()
+        case(run_example)()
     print("\n%d failure(s)" % len(FAILURES) if FAILURES else "\nall passed")
     return 1 if FAILURES else 0
 

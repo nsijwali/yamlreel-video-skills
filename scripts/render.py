@@ -6,7 +6,7 @@ Usage: render.py SPEC [--stage preview|final|all] [--out DIR] [--format F] [--co
 
 Stdlib only. Exit codes: 0 ok, 1 yamlreel error/timeout/OS error, 2 preflight refused, 3 warnings block the final
 render, 4 usage error (bad arguments). The last stdout line is `RESULT {json}`, also on refusals and usage errors.
-Default output folder: <spec folder>/out. $YAMLREEL_RENDER_TIMEOUT (seconds) overrides every subprocess timeout.
+Default output folder: <spec folder>/out. $YAMLREEL_RENDER_TIMEOUT (seconds) overrides every subprocess timeout (values <= 1 are ignored).
 """
 from __future__ import annotations
 
@@ -30,22 +30,70 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 FORMATS = ("vertical", "landscape", "square")
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
+# (label, regex, name of the group holding the secret value or None). A value that is an obvious placeholder
+# (YOUR_*, <...>, xxx, ..., ${VAR}, $VAR, ALLCAPS_NAME) is exempt, so "use a placeholder" guidance works.
+_KEYWORDS = r"(?P<kw>password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|auth)"
 SECRET_PATTERNS = (
-    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("API secret key (sk-...)", re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}")),
-    ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_")),
-    ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}")),
-    ("Stripe live key", re.compile(r"[sr]k_live_[0-9a-zA-Z]{16,}")),
-    ("GitLab token", re.compile(r"glpat-")),
-    ("Slack token", re.compile(r"xox[abposr]-")),
-    ("JWT", re.compile(r"eyJ[\w-]+\.eyJ[\w-]+")),
-    ("private key block", re.compile(r"-----BEGIN")),
-    # An assignment-looking value is required so narration prose ("the token: refresh it") is not flagged:
-    # a quoted value of 6+ chars, or a bare value of 8+ chars holding a digit or one of _ - / + =.
+    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), None),
+    ("API secret key (sk-...)", re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}"), None),
+    ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_"), None),
+    ("Google API key", re.compile(r"AIza[0-9A-Za-z_-]{35}"), None),
+    ("Stripe key", re.compile(r"[sr]k_live_[0-9a-zA-Z]{16,}|sk_test_"), None),
+    ("GitLab token", re.compile(r"glpat-"), None),
+    ("Slack token", re.compile(r"xox[abposr]-|xapp-"), None),
+    ("Hugging Face token", re.compile(r"hf_[A-Za-z0-9]{30,}"), None),
+    ("npm token", re.compile(r"npm_[A-Za-z0-9]{36}"), None),
+    ("SendGrid key", re.compile(r"SG\.[\w-]{20,}\.[\w-]{20,}"), None),
+    ("JWT", re.compile(r"eyJ[\w-]+\.eyJ[\w-]+"), None),
+    ("private key block", re.compile(r"-----BEGIN"), None),
+    ("bearer token", re.compile(r"Bearer\s+(?P<val>[A-Za-z0-9._~+/-]{16,})"), "val"),
+    ("password in a URL", re.compile(r"://[^/\s:@]+:(?P<val>[^/\s@]+)@"), "val"),
+    # keyword (optionally prefixed/suffixed, e.g. AWS_SECRET_ACCESS_KEY, "auth_header"), optional quotes (plain,
+    # escaped \" or doubled ''), then : or =, then either a quoted value (6+ chars, 4+ for passwords) or a bare one:
+    # passwords/pwd 4+ chars; others 8+ chars holding a digit or one of / + = (so "secret: rate-limiting" is prose).
     ("password/secret/token/api key assignment", re.compile(
-        r"""(?:password|passwd|secret|token|api[_-]?key)["']?\s*[:=]\s*"""
-        r"""(?:"[^"\s]{6,}"|'[^'\s]{6,}'|(?=[^\s"']*[0-9_\-/+=])[^\s"']{8,})""", re.I)),
+        _KEYWORDS + r"""[\w-]*\\?["']{0,2}\s*[:=]\s*"""
+        r"""(?:(?P<q>\\?["']{1,2})(?P<qv>[^\s"'\\]{4,})(?=\\?["'])|(?P<uv>[^\s"'\\]+))""", re.I), "assign"),
 )
+PASSWORD_KEYWORDS = ("password", "passwd", "pwd")
+ALLCAPS_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
+USERINFO_RE = re.compile(r"(://)[^/\s@]+@")
+
+
+def is_placeholder(value: str) -> bool:
+    if ALLCAPS_RE.match(value):
+        return True
+    return bool(re.match(r"^(?:YOUR[_-].*|<.*|\$\{.*|\$[A-Za-z_]\w*|x{3,}|\.{3}|\*{3,})$", value, re.I))
+
+
+def find_secret(line: str) -> "str | None":
+    """Label of the first possible secret on the line, or None."""
+    for label, rx, group in SECRET_PATTERNS:
+        for m in rx.finditer(line):
+            if group is None:
+                return label
+            if group == "assign":
+                quoted = m.group("q") is not None
+                value = m.group("qv") if quoted else m.group("uv")
+                if is_placeholder(value):
+                    continue
+                password = m.group("kw").lower() in PASSWORD_KEYWORDS
+                if quoted:
+                    if len(value) >= (4 if password else 6):
+                        return label
+                    continue
+                if (password and len(value) >= 4) or (len(value) >= 8 and re.search(r"[0-9/+=]", value)):
+                    return label
+            elif not is_placeholder(m.group(group)):
+                return label
+    return None
+
+
+def scrub(text: str) -> str:
+    """Remove URL credentials from text that is about to be printed or put in RESULT."""
+    return USERINFO_RE.sub(r"\1***@", text)
+
+
 COMMENT_RE = re.compile(r"(^|\s)#.*$")
 TODO_RE = re.compile(r"\bTODO\b")
 RENDERED_RE = re.compile(r"^\s+(\w+): (.+) \(([\d.]+)s, (\d+)x(\d+)\)\s*$")
@@ -100,13 +148,13 @@ def preflight(spec: Path, out: Path, voice_url: "str | None", cwd: Path) -> None
     except (OSError, UnicodeDecodeError) as e:
         raise Refused("cannot read spec: %s" % e)
     for n, line in enumerate(text.splitlines(), 1):
-        if TODO_RE.search(COMMENT_RE.sub("", line)):
-            raise Refused("TODO placeholder at %s:%d; fill it in: %s" % (spec.name, n, line.strip()))
+        label = find_secret(line)
+        if label:
+            raise Refused("possible secret (%s) at %s:%d; specs are burned into frames and share copy. "
+                          "Use a placeholder such as YOUR_KEY or rename the token." % (label, spec.name, n))
     for n, line in enumerate(text.splitlines(), 1):
-        for label, rx in SECRET_PATTERNS:
-            if rx.search(line):
-                raise Refused("possible secret (%s) at %s:%d; specs are burned into frames and share copy. "
-                              "Use a placeholder or rename the token." % (label, spec.name, n))
+        if TODO_RE.search(COMMENT_RE.sub("", line)):
+            raise Refused("TODO placeholder at %s:%d; fill it in: %s" % (spec.name, n, scrub(line.strip())))
     if voice_url is not None:
         shown = redact_url(voice_url) if "\\" not in voice_url else "<url with backslash>"
         msg = ("--voice-url must be http(s) on 127.0.0.1, localhost or ::1 (narration text is sent there); got %s" % shown)
@@ -117,6 +165,9 @@ def preflight(spec: Path, out: Path, voice_url: "str | None", cwd: Path) -> None
             u.port  # noqa: B018 - raises ValueError on a bad port
         except ValueError:
             raise Refused(msg)
+        if "@" in u.netloc:
+            raise Refused("--voice-url must not contain credentials (user:password@host); got %s. Put the server "
+                          "behind a local URL without userinfo." % redact_url(voice_url))
         if u.scheme not in ("http", "https") or (u.hostname or "") not in LOCAL_HOSTS:
             raise Refused(msg)
 
@@ -138,10 +189,12 @@ class Logger:
 
 
 def timeout_for(default: int) -> int:
+    """$YAMLREEL_RENDER_TIMEOUT (seconds) when it is an integer above 1; otherwise the default."""
     try:
-        return int(os.environ["YAMLREEL_RENDER_TIMEOUT"])
+        value = int(os.environ["YAMLREEL_RENDER_TIMEOUT"])
     except (KeyError, ValueError):
         return default
+    return value if value > 1 else default
 
 
 def run_yamlreel(cmd: "list[str]", log: Logger, timeout: int = 3600) -> "subprocess.CompletedProcess":
@@ -219,8 +272,8 @@ def build_cmd(ym: str, sub: str, spec: Path, args: argparse.Namespace, out: "Pat
 
 
 def result_line(stage: str, ok: bool, warnings: "list[str]", formats: dict, share: "str | None") -> str:
-    return "RESULT " + json.dumps({"stage": stage, "ok": ok, "warnings": warnings, "formats": formats,
-                                   "share_copy": share})
+    return scrub("RESULT " + json.dumps({"stage": stage, "ok": ok, "warnings": warnings, "formats": formats,
+                                         "share_copy": share}))
 
 
 def do_render(ym: str, spec: Path, args: argparse.Namespace, out: Path, preview: bool, log: Logger):
@@ -230,13 +283,13 @@ def do_render(ym: str, spec: Path, args: argparse.Namespace, out: Path, preview:
     r = run_yamlreel(build_cmd(ym, "render", spec, args, out=out, preview=preview), log,
                      timeout=1800 if preview else 3600)
     if r.returncode != 0:
-        sys.stderr.write(r.stderr)
+        sys.stderr.write(scrub(r.stderr))
         return r.returncode, {}, [], None, r.stderr
     formats, warnings, share = parse_render(r.stdout, r.stderr)
     for fmt, info in formats.items():
         print("  %s: %s (%.1fs, %dx%d)" % (fmt, info["video"], info["seconds"], *info["size"]))
     for w in warnings:
-        print("  warning: %s" % w)
+        print("  warning: %s" % scrub(w))
     return 0, formats, warnings, share, r.stderr
 
 
@@ -275,7 +328,7 @@ def main(argv: "list[str] | None" = None) -> int:
     try:
         preflight(spec, out, args.voice_url, cwd)
     except Refused as e:
-        print("refused: %s" % e, file=sys.stderr)
+        print("refused: %s" % scrub(str(e)), file=sys.stderr)
         print(result_line(args.stage, False, ["preflight: %s" % e], {}, None))
         return 2
 
@@ -297,10 +350,10 @@ def main(argv: "list[str] | None" = None) -> int:
     print("validate ...", flush=True)
     r = run_yamlreel(build_cmd(ym, "validate", spec, args), log, timeout=120)
     if r.returncode != 0:
-        sys.stderr.write(r.stderr)
+        sys.stderr.write(scrub(r.stderr))
         print(result_line(args.stage, False, [r.stderr.strip()], {}, None))
         return 1
-    print(r.stdout.strip())
+    print(scrub(r.stdout.strip()))
 
     formats: dict = {}
     warnings: "list[str]" = []
