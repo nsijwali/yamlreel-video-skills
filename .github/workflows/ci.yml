@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Keep in sync with VERSION_SPEC in scripts/check_setup.py.
-      YAMLREEL_SPEC: "yamlreel[ffmpeg]>=0.3.0,<0.4"
+      YAMLREEL_SPEC: "yamlreel[ffmpeg]>=0.3.1,<0.4"
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
