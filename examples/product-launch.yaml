@@ -1,0 +1,35 @@
+# ~20s product launch, vertical + square, for a fictional product ("Tidyboard", example.com).
+meta:
+  title: Tidyboard 1.0 is here
+  description: A fictional launch video used as an example. Tidyboard keeps a team's tasks on one calm board.
+  tags: [launch, productivity, example]
+  links: [https://example.com/tidyboard]
+theme: washi
+formats: [vertical, square]
+music: {style: ambient, seed: 7}
+scenes:
+  - type: type
+    text: Your tasks, finally in one place.
+    seconds: 3
+    narration: What if every task your team has lived in one calm place?
+  - type: bullets
+    title: Tidyboard 1.0
+    seconds: 7
+    stagger: 1.4
+    narration: Tidyboard gives you a single board, quick capture from anywhere, and a weekly digest.
+    items:
+      - One board for the whole team
+      - Quick capture from anywhere
+      - A calm weekly digest
+  - type: stat
+    eyebrow: Free during launch month
+    value: "5 min"
+    label: from sign-up to your first board
+    seconds: 4.5
+    narration: Setup takes about five minutes.
+  - type: title
+    eyebrow: Available today
+    title: Tidyboard
+    subtitle: Try it at example.com/tidyboard
+    seconds: 4.5
+    narration: false

@@ -1,0 +1,49 @@
+# ~30s explainer, vertical + landscape: a token bucket rate limiter.
+# Render without a voice: python3 scripts/render.py examples/system-design-rate-limiter.yaml --stage all
+# `narration:` lines are good practice for a voiced cut; --no-voice (the skill's default) strips them.
+meta:
+  title: Rate limiting with a token bucket in 30 seconds
+  description: How a token bucket lets a burst through but keeps the average rate under control.
+  tags: [systemdesign, ratelimiting, backend]
+theme: midnight
+formats: [vertical, landscape]
+music: {style: koto, seed: 7}
+scenes:
+  - type: type
+    text: How does an API say "slow down"?
+    seconds: 3
+    narration: How does an API tell one noisy client to slow down without hurting everyone else?
+  - type: diagram
+    title: Check before you serve
+    caption: No token, no request.
+    seconds: 8
+    narration: Every request passes a limiter first. If the client has a token, the request goes through. If not, it is turned away.
+    nodes:
+      - {id: client, label: Client, kind: client, x: 0.13, y: 0.46, vx: 0.4, vy: 0.2}
+      - {id: limiter, label: Rate limiter, kind: service, x: 0.5, y: 0.46, vx: 0.4, vy: 0.4}
+      - {id: api, label: API, kind: service, x: 0.87, y: 0.46, vx: 0.4, vy: 0.6}
+    edges:
+      - {from: client, to: limiter, label: request}
+      - {from: limiter, to: api, label: has token}
+    flash:
+      - {node: limiter, at: 4.2, text: "429 bucket empty", color: accent2}
+  - type: bullets
+    title: The token bucket
+    seconds: 8
+    stagger: 1.2
+    narration: A bucket holds a fixed number of tokens. Each request takes one. The bucket refills at a steady rate, so short bursts are fine.
+    items:
+      - A bucket holds N tokens
+      - Each request takes one token
+      - Tokens refill at a steady rate
+  - type: stat
+    eyebrow: Burst of 100, refill 10 per second
+    value: "10/s"
+    label: sustained rate, bursts allowed
+    seconds: 5
+    narration: That gives you a sustained ten requests a second, with room for bursts.
+  - type: cta
+    seconds: 6
+    question: Where do you rate limit?
+    answers: [At the gateway, In the service, Both]
+    narration: false

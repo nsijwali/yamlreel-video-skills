@@ -1,0 +1,29 @@
+# ~15s code tip, vertical: debug with the f-string "=" specifier.
+meta:
+  title: "Python tip: debug with f-string ="
+  description: Print a variable name and its value with one character.
+  tags: [python, debugging, tips]
+theme: midnight
+formats: [vertical]
+music: {style: koto, seed: 7}
+scenes:
+  - type: type
+    text: Still typing print("x =", x)?
+    seconds: 3
+    narration: Still typing the variable name twice just to print it?
+  - type: code
+    title: debug.py
+    seconds: 8
+    code: |
+      total = 42
+      print(f"{total=}")
+      # total=42
+    highlight: [2]
+    caption: One equals sign. Name and value.
+    narration: Add an equals sign inside the f-string braces and Python prints the name and the value together.
+  - type: stat
+    eyebrow: Python 3.8+
+    value: "1 char"
+    label: instead of typing the name twice
+    seconds: 4
+    narration: One character instead of typing the name twice.
