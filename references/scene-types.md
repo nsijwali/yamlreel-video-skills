@@ -3,7 +3,7 @@
 Every scene takes `type`, `seconds`, and optionally `caption` (lower third), `narration` (string, or `false` for
 silent), `step`, `transition`, `energy`. For voiced renders also `subtitles` (bool), `keywords` (words to highlight in
 the subtitles), `narration_words` (path to a JSON file of `{word, start, end}` entries) and `narration_audio` (path
-to a .wav file); keep both files next to the spec. Unknown keys are errors. `bullets`, `table` and `array` reveal
+to a .wav file); keep both files next to the spec. Unknown keys are errors. `bullets`, `table`, `array` and `tree` reveal
 their items with `stagger` (seconds between items). Each block below is validated by `tests/e2e.py`
 (wrapped as the only scene of a spec).
 
@@ -91,6 +91,61 @@ One row of cells with sorted inserts, pushes, pops, marks and a window. Fields: 
     - {at: 2.0, pop: front}
     - {at: 3.0, window: [0, 1], text: next up}
   seconds: 5
+```
+
+## meter
+A level that fills and drains: `bucket`, `bar` or `slots` (slots: capacity up to 20). Fields: `title`, `shape`
+(default bucket), `capacity` (required), `start` (0..capacity), `unit`, `in_label` (drops fall in while it rises),
+`out_label` (drops leave while it falls), `steps` (each has `at`, `level` in 0..capacity, optional `seconds` for the
+move, `text`, `color`). Keep the unit short ("M rows", not "million rows"): a long readout wraps.
+```yaml
+- type: meter
+  title: Token bucket
+  shape: bucket
+  capacity: 10
+  start: 10
+  unit: tokens
+  in_label: refill 1 per second
+  steps:
+    - {at: 1.0, level: 4, seconds: 0.8, text: "burst of 6"}
+    - {at: 4.0, level: 10, seconds: 4}
+  seconds: 9
+```
+
+## tree
+Top-down tree laid out automatically (up to 31 nodes, 5 levels, 6 children each). Fields: `title`, `nodes` (each
+`id`, `label`, `parent`, optional `at`; the first node is the root and parents come first), `path` (each `at`,
+`nodes` to light up hop by hop, `text`).
+```yaml
+- type: tree
+  title: Finding key 75
+  nodes:
+    - {id: root, label: "40"}
+    - {id: left, label: "20", parent: root}
+    - {id: right, label: "60 80", parent: root}
+    - {id: leaf, label: "65 75", parent: right}
+  path:
+    - {at: 3.0, nodes: [root, right, leaf], text: "2 hops"}
+  seconds: 8
+```
+
+## timeline
+Events on an axis with a sliding window and a live "N in window" count. Fields: `title`, `axis` (`from`, `to`,
+`unit`, `ticks` = label spacing), `events` (up to 60; each `x` inside the axis, `at`, optional `label`, `color`),
+`window` (each `at`, `range: [lo, hi]` inside the axis, `text`), `count: true`.
+```yaml
+- type: timeline
+  title: Requests in the last 60 s
+  axis: {from: 0, to: 120, unit: s, ticks: 20}
+  count: true
+  events:
+    - {x: 5, at: 0.4}
+    - {x: 52, at: 1.0, label: burst, color: accent}
+    - {x: 96, at: 1.5}
+  window:
+    - {at: 2.0, range: [0, 60], text: "first 60 s"}
+    - {at: 5.0, range: [40, 100], text: slides}
+  seconds: 8
 ```
 
 ## cta

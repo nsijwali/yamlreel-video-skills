@@ -14,7 +14,7 @@ finished short video: YouTube Shorts / Reels / TikTok (vertical 1080x1920), land
 
 - macOS or Linux (Windows is untested upstream and unsupported for now)
 - Python 3.10+
-- `yamlreel>=0.3.0,<0.4` (installed by `scripts/check_setup.py --install`, with ffmpeg via the `yamlreel[ffmpeg]` extra). The skill needs the `story` command, `render --contact-frames` and the newer scene types, first released in 0.3.0; `check_setup.py` probes for them and says `upgrade yamlreel` if they are missing. The range lives in one place, `MIN_VERSION`/`MAX_EXCLUSIVE` in `scripts/check_setup.py`.
+- `yamlreel>=0.3.1,<0.4` (installed by `scripts/check_setup.py --install`, with ffmpeg via the `yamlreel[ffmpeg]` extra). The skill needs the `story` command, `render --contact-frames` and the newer scene types (meter, tree and timeline arrive in 0.3.1); `check_setup.py` probes for them and says `upgrade yamlreel` if they are missing. The range lives in one place, `MIN_VERSION`/`MAX_EXCLUSIVE` in `scripts/check_setup.py`.
 - DejaVu fonts: macOS `brew install --cask font-dejavu`; Debian/Ubuntu `sudo apt install fonts-dejavu-core`
 
 ## Install

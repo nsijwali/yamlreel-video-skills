@@ -23,9 +23,9 @@ from typing import NamedTuple
 MIN_PY = (3, 10)
 # The yamlreel version this skill needs. The single source of truth: --install, the version check, SKILL.md,
 # README.md (tests/e2e.py asserts both quote VERSION_SPEC) and CI all derive from these two constants.
-# 0.3.0 is the first release with `story`, --contact-frames, table/array/cta, stagger/count, transition/energy
-# and music styles. Keep the CI pin (YAMLREEL_SPEC) and the two doc strings in sync when this changes.
-MIN_VERSION = (0, 3, 0)
+# 0.3.0 added `story`, --contact-frames, table/array/cta, stagger/count, transition/energy and music styles;
+# 0.3.1 is the first release with the meter, tree and timeline scenes. Keep the CI pin (YAMLREEL_SPEC) and the two doc strings in sync when this changes.
+MIN_VERSION = (0, 3, 1)
 MAX_EXCLUSIVE = (0, 4, 0)
 VERSION_SPEC = ">=%s,<%d.%d" % (".".join(map(str, MIN_VERSION)), MAX_EXCLUSIVE[0], MAX_EXCLUSIVE[1])
 PIN = "yamlreel[ffmpeg]" + VERSION_SPEC
@@ -59,6 +59,24 @@ scenes:
     question: Which one?
     answers: [A, B]
     transition: slide
+    seconds: 3
+  - type: meter
+    capacity: 4
+    start: 4
+    steps:
+      - {at: 1.0, level: 1}
+    seconds: 3
+  - type: tree
+    nodes:
+      - {id: a, label: A}
+      - {id: b, label: B, parent: a}
+    seconds: 3
+  - type: timeline
+    axis: {from: 0, to: 10, unit: s, ticks: 5}
+    events:
+      - {x: 2, at: 0.5}
+    window:
+      - {at: 1.0, range: [0, 5]}
     seconds: 3
 """
 
@@ -190,7 +208,7 @@ def probe_features(ym: str) -> "tuple[bool, str]":
             return False, "cannot probe %s: %s" % (ym, e)
     if v.returncode != 0:
         lines = (v.stderr or v.stdout).strip().splitlines()
-        return False, "cannot validate a spec using table, array, cta, stagger, transition, energy and music lofi: %s" % (
+        return False, "cannot validate a spec using table, array, cta, meter, tree, timeline, stagger, transition, energy and music lofi: %s" % (
             lines[-1] if lines else "exit %d" % v.returncode)
     return True, "`story`, `render --contact-frames` and the newer scene types present"
 

@@ -150,7 +150,7 @@ def test_scene_snippets() -> None:
     assert YAMLREEL, "yamlreel not found"
     text = (ROOT / "references" / "scene-types.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```yaml\n(.*?)```", text, re.S)
-    assert len(blocks) == 10, "expected 10 scene snippets, found %d" % len(blocks)
+    assert len(blocks) == 13, "expected 13 scene snippets, found %d" % len(blocks)
     with tempfile.TemporaryDirectory() as tmp:
         for i, block in enumerate(blocks):
             body = "".join("  " + ln if ln.strip() else ln for ln in block.splitlines(True))
@@ -470,7 +470,7 @@ def test_check_setup() -> None:
 
 @case
 def test_check_setup_units() -> None:
-    assert VERSION_SPEC == ">=0.3.0,<0.4", VERSION_SPEC
+    assert VERSION_SPEC == ">=0.3.1,<0.4", VERSION_SPEC
     assert check_setup.PIN == "yamlreel[ffmpeg]" + VERSION_SPEC
     with tempfile.TemporaryDirectory() as d:
         old = os.environ.get("YAMLREEL_FONT_DIR")
@@ -556,7 +556,7 @@ def test_assess_unreleased_build_branch() -> None:
         with patched_env(YAMLREEL_BIN=str(c), YAMLREEL_VENV=str(dp / "novenv"), PATH=path_without_yamlreel()):
             checks, _ = check_setup.run_checks()
         msg = [x for x in checks if x["name"] == "yamlreel"][0]
-        assert ">=0.3.0,<0.4" in msg["detail"] and "downgrade" in msg["fix"] and "pin" in msg["fix"], msg
+        assert ">=0.3.1,<0.4" in msg["detail"] and "downgrade" in msg["fix"] and "pin" in msg["fix"], msg
 
 
 @case
