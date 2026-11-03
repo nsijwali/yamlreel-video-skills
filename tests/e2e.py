@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end and hygiene tests for the yamlreel-video skill. Stdlib only.
+"""End-to-end and hygiene tests for the yamlreel-video-skills skill. Stdlib only.
 
 Usage: tests/e2e.py [--preview]
   --preview  render examples with --stage preview only (fast, used in CI); default runs --stage all.

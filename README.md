@@ -1,4 +1,4 @@
-# yamlreel-video
+# yamlreel-video-skills
 
 An [Agent Skill](https://agentskills.io) that lets an AI agent (Claude Code and compatible clients) turn a topic into a
 finished short video: YouTube Shorts / Reels / TikTok (vertical 1080x1920), landscape (1920x1080) or square
@@ -19,15 +19,15 @@ finished short video: YouTube Shorts / Reels / TikTok (vertical 1080x1920), land
 
 ## Install
 
-**The target folder name must be `yamlreel-video`** (it has to match the `name` in `SKILL.md`; the GitHub repo should be named `yamlreel-video` too):
+**The target folder name must be `yamlreel-video-skills`** (it has to match the `name` in `SKILL.md`; the GitHub repo should be named `yamlreel-video-skills` too):
 
 ```bash
-git clone https://github.com/nsijwali/yamlreel-video ~/.claude/skills/yamlreel-video
-python3 ~/.claude/skills/yamlreel-video/scripts/check_setup.py            # reports what is missing
-python3 ~/.claude/skills/yamlreel-video/scripts/check_setup.py --install  # creates ~/.yamlreel/venv and pip installs yamlreel
+git clone https://github.com/nsijwali/yamlreel-video-skills ~/.claude/skills/yamlreel-video-skills
+python3 ~/.claude/skills/yamlreel-video-skills/scripts/check_setup.py            # reports what is missing
+python3 ~/.claude/skills/yamlreel-video-skills/scripts/check_setup.py --install  # creates ~/.yamlreel/venv and pip installs yamlreel
 ```
 
-Project-scoped: clone into `.claude/skills/yamlreel-video` instead. The installer never installs fonts or system
+Project-scoped: clone into `.claude/skills/yamlreel-video-skills` instead. The installer never installs fonts or system
 packages; it prints the command for you to run.
 
 ## Use
@@ -40,7 +40,7 @@ By hand, from your project folder (never your home folder) and with the full scr
 
 ```bash
 cd ~/my-videos
-S=~/.claude/skills/yamlreel-video
+S=~/.claude/skills/yamlreel-video-skills
 python3 $S/scripts/render.py videos/demo/spec.yaml --out videos/demo/out   # preview, contact-sheet check, final render
 python3 $S/scripts/render.py videos/demo/spec.yaml --out videos/demo/out --stage preview --format vertical
 ```

@@ -1,6 +1,6 @@
-# Spec: yamlreel-video Agent Skill
+# Spec: yamlreel-video-skills Agent Skill
 
-Status: proposed · Repo: github.com/nsijwali/yamlreel-video (MIT) · Target: yamlreel >=0.3.0,<0.4 (placeholder, unreleased; see MIN_VERSION in scripts/check_setup.py)
+Status: proposed · Repo: github.com/nsijwali/yamlreel-video-skills (MIT) · Target: yamlreel >=0.3.0,<0.4 (placeholder, unreleased; see MIN_VERSION in scripts/check_setup.py)
 
 ## 1. Problem and requirements
 Agents can write a script but cannot hand back a finished short video without a video editor. yamlreel renders a YAML
@@ -55,7 +55,7 @@ Examples contain `narration:` lines (good practice; stripped by `--no-voice`), `
 
 ### 3.2 SKILL.md frontmatter
 ```yaml
-name: yamlreel-video
+name: yamlreel-video-skills
 description: Turn a topic into a finished short video (YouTube Shorts, Reels, TikTok vertical, landscape or square)
   without a video editor, by writing a YAML spec and rendering it locally with the open-source yamlreel CLI. Use when
   the user asks to make, script or render a short video, explainer, code tip, system-design video, or project/product
@@ -144,14 +144,14 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
 - Vendoring or auto-pinning yamlreel in the repo: duplicates an MIT package already on PyPI; pip install is simpler.
 - Single-shot full render: wastes minutes on broken layouts; preview + contact sheet catches them in seconds.
 - Font check by importing yamlreel internals: couples to private APIs; the smoke render is authoritative and stable.
-- Skill in a `skills/yamlreel-video/` subfolder: cleaner for multi-skill repos but complicates clone-install and
+- Skill in a `skills/yamlreel-video-skills/` subfolder: cleaner for multi-skill repos but complicates clone-install and
   submission. Root layout + explicit clone target wins for one skill.
 - `allowed-tools` frontmatter: experimental and client-specific; omit, rely on normal permission prompts.
 - Auto-installing fonts via brew: system change without consent; print the command instead.
 
 ## 5. Rollout and compatibility
-- New repo; nothing to migrate. Install: `git clone https://github.com/nsijwali/yamlreel-video ~/.claude/skills/yamlreel-video`
-  (the target name must equal `name`; README says so in bold). Project-scoped: `.claude/skills/yamlreel-video`.
+- New repo; nothing to migrate. Install: `git clone https://github.com/nsijwali/yamlreel-video-skills ~/.claude/skills/yamlreel-video-skills`
+  (the target name must equal `name`; README says so in bold). Project-scoped: `.claude/skills/yamlreel-video-skills`.
 - Tag `v0.1.0` once acceptance passes on macOS and CI is green; then submit the repo URL to mcpmarket.com.
 - Pin `yamlreel>=0.3.0,<0.4`. On a yamlreel minor release: rerun `tests/e2e.py`, update cheatsheet, widen pin, tag.
 

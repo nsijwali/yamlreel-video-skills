@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check (and optionally install) what the yamlreel-video skill needs.
+"""Check (and optionally install) what the yamlreel-video-skills skill needs.
 
 Usage: check_setup.py [--install] [--json]
 
@@ -391,7 +391,7 @@ def install(log) -> "tuple[int, str | None]":
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    ap = argparse.ArgumentParser(description="Check the yamlreel-video skill environment.")
+    ap = argparse.ArgumentParser(description="Check the yamlreel-video-skills skill environment.")
     ap.add_argument("--install", action="store_true", help="create the venv and pip install yamlreel (asks nothing; run only with the user's yes)")
     ap.add_argument("--json", action="store_true", help="machine-readable output (stdout is a single JSON object)")
     args = ap.parse_args(argv)
