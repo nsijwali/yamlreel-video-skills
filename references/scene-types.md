@@ -1,7 +1,10 @@
 # Scene types
 
 Every scene takes `type`, `seconds`, and optionally `caption` (lower third), `narration` (string, or `false` for
-silent), `step`, `transition`, `energy`. Unknown keys are errors. Each block below is validated by `tests/e2e.py`
+silent), `step`, `transition`, `energy`. For voiced renders also `subtitles` (bool), `keywords` (words to highlight in
+the subtitles), `narration_words` (path to a JSON file of `{word, start, end}` entries) and `narration_audio` (path
+to a .wav file); keep both files next to the spec. Unknown keys are errors. `bullets`, `table` and `array` reveal
+their items with `stagger` (seconds between items). Each block below is validated by `tests/e2e.py`
 (wrapped as the only scene of a spec).
 
 ## title

@@ -5,6 +5,10 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    env:
+      # TODO-RELEASE: after the yamlreel release is on PyPI, switch to the pin in scripts/check_setup.py
+      # (VERSION_SPEC), e.g. "yamlreel[ffmpeg]>=0.3.0,<0.4".
+      YAMLREEL_SPEC: "yamlreel[ffmpeg] @ git+https://github.com/nsijwali/yamlreel@main"
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
@@ -16,7 +20,7 @@ jobs:
       - name: System fonts
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
       - name: Install yamlreel
-        run: python -m pip install "yamlreel[ffmpeg]>=0.2.2,<0.3"
+        run: python -m pip install "$YAMLREEL_SPEC"
       - name: Setup check
         run: python scripts/check_setup.py
       - name: E2E (preview)

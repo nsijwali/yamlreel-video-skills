@@ -2,8 +2,13 @@
 
 | You see | Fix |
 | --- | --- |
+| `usage error: --contact-frames must be between 1 and 8` (render.py exit 4) | Pass a number from 1 to 8. |
+| `refused: current directory ... is your home or the filesystem root` (exit 2) | `cd` into the project folder; render.py will not scan or write under `~` or `/`. |
+| `yamlreel timed out` / `cannot run yamlreel` (exit 1) | Render one format at a time, shorten the video, or fix `$YAMLREEL_BIN`; `$YAMLREEL_RENDER_TIMEOUT` (seconds) overrides the limit. |
+| `upgrade yamlreel` from `check_setup.py` | Your yamlreel lacks `story` or `--contact-frames`; install the version range in `scripts/check_setup.py` (`--install`). |
+| render.py exit 3, `meta.title is empty` (or `share-copy.txt` has an empty or generic title) | Set `meta.title` (under about 70 chars) in the spec and render again. |
 | `refused: TODO placeholder ...` (render.py exit 2) | Replace every `TODO` that `yamlreel story` left in the spec. |
-| `refused: possible secret ...` (exit 2) | Remove or rename the token or the `password:`/`api_key:` line; specs are burned into frames. |
+| `refused: possible secret ...` (exit 2) | Remove or rename the key, token, JWT or the `password:`/`token:`/`api_key:` line; specs are burned into frames. |
 | `refused: spec ... is outside the current directory` (exit 2) | `cd` to the project folder and keep the spec inside it. |
 | `refused: --voice-url must be http(s) on 127.0.0.1 ...` | Voice only works with a local server; otherwise drop `--voice-url`. |
 | render.py exit 3, `text shrunk to fit` | Shorten that text (stat values about 8 chars, bullets about 40). |

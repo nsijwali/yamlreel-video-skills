@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
 yamlreel-output/
+out/
 videos/
 .venv/

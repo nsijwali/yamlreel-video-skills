@@ -14,15 +14,15 @@ finished short video: YouTube Shorts / Reels / TikTok (vertical 1080x1920), land
 
 - macOS or Linux (Windows is untested upstream and unsupported for now)
 - Python 3.10+
-- `yamlreel>=0.2.2,<0.3` (installed by `scripts/check_setup.py --install`, with ffmpeg via the `[ffmpeg]` extra)
+- `yamlreel>=0.3.0,<0.4` (installed by `scripts/check_setup.py --install`, with ffmpeg via the `yamlreel[ffmpeg]` extra). The skill needs the `story` command, `render --contact-frames` and the newer scene types, which are newer than PyPI's 0.2.2; `check_setup.py` probes for them and says `upgrade yamlreel` if they are missing. The range lives in one place, `MIN_VERSION`/`MAX_EXCLUSIVE` in `scripts/check_setup.py`.
 - DejaVu fonts: macOS `brew install --cask font-dejavu`; Debian/Ubuntu `sudo apt install fonts-dejavu-core`
 
 ## Install
 
-**The target folder name must be `yamlreel-video`** (it has to match the `name` in `SKILL.md`):
+**The target folder name must be `yamlreel-video`** (it has to match the `name` in `SKILL.md`; the GitHub repo should be named `yamlreel-video` too):
 
 ```bash
-git clone https://github.com/nsijwali/yamlreel-skill ~/.claude/skills/yamlreel-video
+git clone https://github.com/nsijwali/yamlreel-video ~/.claude/skills/yamlreel-video
 python3 ~/.claude/skills/yamlreel-video/scripts/check_setup.py            # reports what is missing
 python3 ~/.claude/skills/yamlreel-video/scripts/check_setup.py --install  # creates ~/.yamlreel/venv and pip installs yamlreel
 ```
@@ -36,15 +36,20 @@ Ask your agent, for example: "make a 15 second Short about Python f-string debug
 writes an outline, drafts a spec with `yamlreel story`, previews it, checks the contact sheet, renders the final video
 and hands back the paths and share copy. See `SKILL.md` for the workflow and `references/` for details.
 
-By hand:
+By hand, from your project folder (never your home folder) and with the full script path:
 
 ```bash
-python3 scripts/render.py examples/code-tip-python.yaml          # preview, contact-sheet check, final render
-python3 scripts/render.py examples/product-launch.yaml --stage preview --format vertical
+cd ~/my-videos
+S=~/.claude/skills/yamlreel-video
+python3 $S/scripts/render.py videos/demo/spec.yaml --out videos/demo/out   # preview, contact-sheet check, final render
+python3 $S/scripts/render.py videos/demo/spec.yaml --out videos/demo/out --stage preview --format vertical
 ```
 
-Output lands in `./yamlreel-output/<spec-stem>/{preview,final}/<format>/`. The last line printed is `RESULT {json}`
-with every path. Exit codes: 0 ok, 1 yamlreel error, 2 preflight refused, 3 preview warnings block the final render.
+The spec and the output folder must be inside the current directory.
+
+Output lands in `<out>/{preview,final}/<format>/`; without `--out` that is `<spec folder>/out`, so pass `--out videos/<slug>/out`
+when specs share a folder. The last line printed is `RESULT {json}` with every path. Exit codes: 0 ok, 1 yamlreel
+error or timeout, 2 preflight refused, 3 preview warnings block the final render, 4 bad arguments.
 
 ## What is inside
 
@@ -52,7 +57,7 @@ with every path. Exit codes: 0 ok, 1 yamlreel error, 2 preflight refused, 3 prev
 | --- | --- |
 | `SKILL.md` | agent instructions and frontmatter |
 | `scripts/check_setup.py` | environment check, optional install, smoke render |
-| `scripts/render.py` | preflight (no TODOs, secrets or remote voice URLs), validate, preview, final render |
+| `scripts/render.py` | preflight (no TODOs, secrets or remote voice URLs; refuses home and `/`), validate, preview, final render |
 | `references/` | scene types, writing guide, troubleshooting, optional voiceover |
 | `examples/` | system-design explainer, code tip, product launch (all render with `--no-voice`) |
 | `tests/e2e.py` | renders every example, validates every snippet, checks preflight and hygiene |

@@ -20,7 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-from check_setup import find_yamlreel  # noqa: E402
+from check_setup import VERSION_SPEC, find_yamlreel  # noqa: E402
+import check_setup  # noqa: E402
+import render as render_mod  # noqa: E402
 
 RENDER = SCRIPTS / "render.py"
 CHECK = SCRIPTS / "check_setup.py"
@@ -63,6 +65,11 @@ def test_frontmatter() -> None:
     assert name and re.fullmatch(r"[a-z0-9-]{1,64}", name.group(1)), "bad name"
     assert desc and len(desc.group(1)) <= 1024, "description missing or too long"
     assert len(text.splitlines()) < 150, "SKILL.md must stay under 150 lines"
+    assert VERSION_SPEC in text, "SKILL.md must quote the required yamlreel range %s" % VERSION_SPEC
+    assert VERSION_SPEC in (ROOT / "README.md").read_text(encoding="utf-8"), "README.md must quote %s" % VERSION_SPEC
+    assert "yamlreel-skill" not in "".join(p.read_text(encoding="utf-8") for p in
+                                           (ROOT / "README.md", ROOT / "SKILL.md", ROOT / ".github" / "workflows" / "ci.yml"))
+    assert "YAMLREEL_SPEC" in (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
 
 @case
@@ -70,7 +77,7 @@ def test_hygiene() -> None:
     bad = []
     for p in ROOT.rglob("*"):
         rel = p.relative_to(ROOT)
-        if not p.is_file() or rel.parts[0] in (".git", "docs", "yamlreel-output") or "__pycache__" in rel.parts:
+        if not p.is_file() or rel.parts[0] in (".git", "docs", "yamlreel-output", "out") or "__pycache__" in rel.parts:
             continue
         if p.suffix == ".wav":
             bad.append("%s: wav file" % rel)
@@ -106,13 +113,39 @@ def test_scene_snippets() -> None:
             assert r.returncode == 0, "snippet %d failed: %s" % (i, r.stderr or r.stdout)
 
 
-GOOD_SPEC = "theme: midnight\nformats: [square]\nscenes:\n  - type: title\n    title: Hello\n    seconds: 1\n"
+GOOD_SPEC = "theme: midnight\nformats: [square]\nmeta:\n  title: Greeting\nscenes:\n  - type: title\n    title: Hello\n    seconds: 1\n"
+
+
+def secret_cases() -> "list[tuple[str, str]]":
+    """(label, text). Built from pieces so this file never holds a real-looking token."""
+    return [
+        ("aws", "AKIA" + "ABCDEFGHIJKLMNOP"),
+        ("sk", "sk-" + "a1B2" * 6),
+        ("sk-proj", "sk-proj-" + "a1_B2-" * 5),
+        ("github ghp", "ghp_" + "a" * 24),
+        ("github gho", "gho_" + "b" * 24),
+        ("github ghs", "ghs_" + "c" * 24),
+        ("github pat", "github_pat_" + "11ABC"),
+        ("google", "AIza" + "x" * 35),
+        ("stripe sk_live", "sk_live_" + "a1" * 8),
+        ("stripe rk_live", "rk_live_" + "b2" * 8),
+        ("gitlab", "glpat-" + "abc123"),
+        ("slack xoxb", "xoxb-" + "123"),
+        ("slack xoxa", "xoxa-" + "123"),
+        ("slack xoxr", "xoxr-" + "123"),
+        ("jwt", "eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0"),
+        ("private key", "-----BEGIN " + "RSA PRIVATE KEY-----"),
+        ("password assignment", "password: hunter2xyz"),
+        ("token assignment", "token = abc123def456"),
+        ("api key assignment", "api_key: \"YOUR_KEY\""),
+        ("secret assignment", "secret: s3cr3t-value"),
+    ]
 
 
 @case
 def test_preflight() -> None:
     with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as elsewhere:
-        proj_p, other = Path(proj), Path(elsewhere)
+        proj_p, other = Path(proj).resolve(), Path(elsewhere).resolve()
 
         def spec(name: str, text: str, where: Path = proj_p) -> Path:
             p = where / name
@@ -121,20 +154,153 @@ def test_preflight() -> None:
 
         r = run([str(RENDER), str(spec("out.yaml", GOOD_SPEC, other)), "--stage", "preview"], proj_p)
         assert r.returncode == 2, "outside cwd: %d" % r.returncode
+        assert result_of(r)["ok"] is False
         r = run([str(RENDER), str(spec("todo.yaml", GOOD_SPEC.replace("Hello", "TODO fix"))), "--stage", "preview"], proj_p)
         assert r.returncode == 2, "TODO: %d" % r.returncode
         r = run([str(RENDER), str(spec("todo2.yaml", GOOD_SPEC + "# TODO later\n")), "--stage", "preview"], proj_p)
-        assert r.returncode != 2, "TODO in comment should pass preflight: %d %s" % (r.returncode, r.stderr)
-        secret = GOOD_SPEC.replace("Hello", "sk-" + "a" * 24)
-        r = run([str(RENDER), str(spec("secret.yaml", secret)), "--stage", "preview"], proj_p)
-        assert r.returncode == 2, "secret: %d" % r.returncode
+        assert r.returncode == 0, "TODO in comment should pass: %d %s" % (r.returncode, r.stderr)
         good = str(spec("good.yaml", GOOD_SPEC))
         r = run([str(RENDER), good, "--stage", "preview", "--voice-url", "https://api.example.com/mcp/"], proj_p)
         assert r.returncode == 2, "remote voice url: %d" % r.returncode
-        r = run([str(RENDER), good, "--stage", "preview", "--voice-url", "http://127.0.0.1:3900/mcp/"], proj_p)
-        assert r.returncode != 2, "local voice url must pass preflight (got %d)" % r.returncode
         r = run([str(RENDER), good, "--stage", "preview", "--out", str(other / "o")], proj_p)
         assert r.returncode == 2, "out dir outside cwd: %d" % r.returncode
+
+
+@case
+def test_secret_patterns() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        for label, secret in secret_cases():
+            p = proj_p / "secret.yaml"
+            p.write_text(GOOD_SPEC.replace("title: Hello", "title: Hello\n    subtitle: '%s'" % secret.replace("'", "''")),
+                         encoding="utf-8")
+            r = run([str(RENDER), str(p), "--stage", "preview"], proj_p)
+            assert r.returncode == 2, "%s: expected exit 2, got %d\n%s" % (label, r.returncode, r.stderr)
+            assert "possible secret" in r.stderr, "%s: %s" % (label, r.stderr)
+            assert result_of(r)["ok"] is False
+
+
+@case
+def test_secret_prose_not_flagged() -> None:
+    prose = ["The token: refresh it", "Never share your secret: keep it safe", "disk-based caching of the layer-cache-key-x",
+             "a password manager", "tokens: reused", "api key rotation: monthly", "sk-short"]
+    for text in prose:
+        try:
+            render_mod.preflight(Path(tmp_spec(text)), Path("out"), None, Path.cwd())
+        except render_mod.Refused as e:
+            if "secret" in str(e):
+                raise AssertionError("prose %r flagged: %s" % (text, e))
+
+
+def tmp_spec(text: str) -> str:
+    d = tempfile.mkdtemp(prefix="yamlreel-prose-")
+    p = Path(d) / "s.yaml"
+    p.write_text(GOOD_SPEC.replace("Hello", text.replace('"', "'")), encoding="utf-8")
+    return str(p)
+
+
+@case
+def test_path_escapes() -> None:
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as elsewhere:
+        proj_p, other = Path(proj).resolve(), Path(elsewhere).resolve()
+        (other / "x.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        (proj_p / "link.yaml").symlink_to(other / "x.yaml")
+        r = run([str(RENDER), "link.yaml", "--stage", "preview"], proj_p)
+        assert r.returncode == 2, "symlinked spec escaping cwd: %d\n%s" % (r.returncode, r.stderr)
+        (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        (proj_p / "outlink").symlink_to(other, target_is_directory=True)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--out", "outlink/o"], proj_p)
+        assert r.returncode == 2, "symlinked out dir escaping cwd: %d\n%s" % (r.returncode, r.stderr)
+        assert not (other / "o").exists()
+        (proj_p / "sub").mkdir()
+        r = run([str(RENDER), "sub/../../" + other.name + "/x.yaml", "--stage", "preview"], proj_p)
+        assert r.returncode == 2, "'..' spec path: %d\n%s" % (r.returncode, r.stderr)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--out", "sub/../../escape"], proj_p)
+        assert r.returncode == 2, "'..' out path: %d\n%s" % (r.returncode, r.stderr)
+
+
+@case
+def test_refuses_home_and_root() -> None:
+    for d in (Path.home(), Path("/")):
+        r = run([str(RENDER), "nonexistent.yaml", "--stage", "preview"], d)
+        assert r.returncode == 2 and "home or the filesystem root" in r.stderr, (d, r.returncode, r.stderr)
+        assert result_of(r)["ok"] is False
+
+
+@case
+def test_usage_errors() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        for bad in (["good.yaml", "--contact-frames", "0"], ["good.yaml", "--contact-frames", "9"],
+                    ["good.yaml", "--contact-frames", "x"], ["good.yaml", "--stage", "bogus"], []):
+            r = run([str(RENDER), *bad], proj_p)
+            assert r.returncode == 4, "%s: expected 4, got %d\n%s" % (bad, r.returncode, r.stderr)
+            res = result_of(r)
+            assert res["ok"] is False and res["stage"] == "usage", res
+        assert not (proj_p / "out").exists(), "usage errors must not create output"
+        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--contact-frames", "2"], proj_p)
+        assert r.returncode == 0, r.stderr
+
+
+@case
+def test_default_out_is_next_to_spec() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        for slug in ("a", "b"):
+            (proj_p / slug).mkdir()
+            (proj_p / slug / "spec.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+            r = run([str(RENDER), "%s/spec.yaml" % slug, "--stage", "preview"], proj_p)
+            assert r.returncode == 0, r.stderr
+            res = result_of(r)
+            assert all(str(proj_p / slug / "out") in info["video"] for info in res["formats"].values()), res
+        assert not (proj_p / "yamlreel-output").exists()
+        assert (proj_p / "a" / "out" / "render-log.txt").is_file() and (proj_p / "b" / "out" / "render-log.txt").is_file()
+
+
+@case
+def test_subprocess_failures() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        slow = proj_p / "slow.sh"
+        slow.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+        slow.chmod(0o755)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p,
+                env={"YAMLREEL_BIN": str(slow), "YAMLREEL_RENDER_TIMEOUT": "1"})
+        assert r.returncode == 1 and "timed out" in r.stderr, (r.returncode, r.stderr)
+        assert result_of(r)["ok"] is False
+        noexec = proj_p / "noexec"
+        noexec.write_text("x", encoding="utf-8")
+        noexec.chmod(0o644)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p, env={"YAMLREEL_BIN": str(noexec)})
+        assert r.returncode == 1 and "cannot run yamlreel" in r.stderr, (r.returncode, r.stderr)
+        assert result_of(r)["ok"] is False
+        (proj_p / "afile").write_text("x", encoding="utf-8")
+        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--out", "afile/sub"], proj_p)
+        assert r.returncode == 1 and "cannot create output folder" in r.stderr, (r.returncode, r.stderr)
+        assert result_of(r)["ok"] is False
+
+
+@case
+def test_voice_url() -> None:
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        (proj_p / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
+        for bad in ("http://127.0.0.1@evil.example.com/mcp/", "http://evil.example.com\\@127.0.0.1/mcp/",
+                    "http://localhost.evil.example.com/mcp/", "http://127.0.0.1:99999/mcp/",
+                    "http://127.0.0.1/ x", "ftp://127.0.0.1/mcp/", "http://u:hunter2pw@evil.example.com/mcp/"):
+            r = run([str(RENDER), "good.yaml", "--stage", "preview", "--voice-url", bad], proj_p)
+            assert r.returncode == 2, "%r: expected 2, got %d\n%s" % (bad, r.returncode, r.stderr)
+            assert "hunter2pw" not in r.stderr + r.stdout, "password leaked in refusal"
+        # A local URL with credentials passes preflight (nothing is listening, so yamlreel exits 1),
+        # and neither the log nor the output may hold the password.
+        url = "http://alice:hunter2pw@127.0.0.1:9/mcp/"
+        r = run([str(RENDER), "good.yaml", "--stage", "preview", "--voice-url", url], proj_p)
+        assert r.returncode in (0, 1), "local voice url must pass preflight (got %d)\n%s" % (r.returncode, r.stderr)
+        log = (proj_p / "out" / "render-log.txt").read_text(encoding="utf-8")
+        assert "--voice-url" in log and "hunter2pw" not in log and "alice" not in log, log
+        assert "hunter2pw" not in r.stdout + r.stderr
 
 
 @case
@@ -148,7 +314,7 @@ def test_warning_blocks_final() -> None:
         assert r.returncode == 3, "expected 3, got %d\n%s\n%s" % (r.returncode, r.stdout, r.stderr)
         res = result_of(r)
         assert not res["ok"] and res["warnings"], res
-        assert not (Path(proj) / "yamlreel-output" / "warn" / "final").exists(), "final must not run"
+        assert not (Path(proj) / "out" / "final").exists(), "final must not run"
         r = run([str(RENDER), str(p), "--stage", "all", "--allow-warnings"], Path(proj))
         assert r.returncode == 0, "allow-warnings: %d\n%s" % (r.returncode, r.stderr)
 
@@ -158,11 +324,72 @@ def test_check_setup() -> None:
     r = run([str(CHECK), "--json"], ROOT)
     data = json.loads(r.stdout)
     assert r.returncode == 0 and data["ok"], r.stdout
+    names = {c["name"]: c for c in data["checks"]}
+    assert names["features"]["ok"] and names["smoke-render"]["ok"], names
+    # An empty YAMLREEL_FONT_DIR adds nothing; the system fonts are still searched, and the smoke render rules.
     with tempfile.TemporaryDirectory() as empty:
         r = run([str(CHECK), "--json"], ROOT, env={"YAMLREEL_FONT_DIR": empty})
         data = json.loads(r.stdout)
-        fonts = [c for c in data["checks"] if c["name"] == "fonts"][0]
-        assert r.returncode == 1 and not fonts["ok"] and "font" in fonts["fix"], fonts
+        assert r.returncode == 0 and data["ok"], r.stdout
+
+
+@case
+def test_check_setup_units() -> None:
+    assert VERSION_SPEC == ">=0.3.0,<0.4", VERSION_SPEC
+    assert check_setup.PIN == "yamlreel[ffmpeg]" + VERSION_SPEC
+    with tempfile.TemporaryDirectory() as d:
+        old = os.environ.get("YAMLREEL_FONT_DIR")
+        os.environ["YAMLREEL_FONT_DIR"] = d
+        try:
+            dirs = check_setup.font_dirs()
+            assert dirs[0] == Path(d) and len(dirs) > 1, dirs
+            for f in check_setup.FONTS:
+                (Path(d) / f).write_text("x", encoding="utf-8")
+            found, missing = check_setup.find_fonts()
+            assert not missing and len(found) == len(check_setup.FONTS), (found, missing)
+        finally:
+            if old is None:
+                os.environ.pop("YAMLREEL_FONT_DIR", None)
+            else:
+                os.environ["YAMLREEL_FONT_DIR"] = old
+    checks = [check_setup.check("fonts", False, "missing x", "fix it"), check_setup.check("ffmpeg", False, "none", "fix"),
+              check_setup.check("python", False, "none", "fix"), check_setup.check("smoke-render", True, "ok")]
+    check_setup.downgrade_when_smoke_passes(checks)
+    assert [c["ok"] for c in checks] == [True, True, False, True], checks
+    assert checks[0]["warning"] and checks[0]["fix"] == "fix it"
+    failed = [check_setup.check("fonts", False, "missing x", "fix it"), check_setup.check("smoke-render", False, "bad")]
+    check_setup.downgrade_when_smoke_passes(failed)
+    assert not failed[0]["ok"], "fonts stay a failure when the smoke render fails"
+
+
+@case
+def test_install_json_stdout_is_pure_json() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        env = {"YAMLREEL_VENV": str(Path(d) / "venv"), "YAMLREEL_SPEC": str(Path(d) / "no-such-package-dir")}
+        r = run([str(CHECK), "--install", "--json"], ROOT, env=env)
+        data = json.loads(r.stdout)  # raises if progress text leaked into stdout
+        assert r.returncode == 1 and data["ok"] is False, r.stdout
+        assert "install failed" in r.stderr, r.stderr
+
+
+@case
+def test_feature_probe_and_version() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        old = Path(d) / "yamlreel"
+        old.write_text("#!/bin/sh\n"
+                       'case "$1" in --version) echo "yamlreel 0.2.2";; story) exit 2;; render) echo "usage: render";; esac\n',
+                       encoding="utf-8")
+        old.chmod(0o755)
+        ok, detail = check_setup.probe_features(str(old))
+        assert not ok and "story" in detail and "--contact-frames" in detail, detail
+        r = run([str(CHECK), "--json"], ROOT, env={"YAMLREEL_BIN": str(old)})
+        data = json.loads(r.stdout)
+        assert r.returncode == 1 and not data["ok"], r.stdout
+        feat = [c for c in data["checks"] if c["name"] == "features"][0]
+        assert not feat["ok"] and "upgrade yamlreel" in feat["fix"], feat
+        link = Path(d) / "link-to-yamlreel"
+        link.symlink_to(Path(YAMLREEL).resolve() if YAMLREEL else old)
+        assert check_setup.probe_features(str(link))[0] or not YAMLREEL
 
 
 def spec_seconds(text: str) -> float:
@@ -205,8 +432,19 @@ def main() -> int:
     test_hygiene()
     test_scene_snippets()
     test_preflight()
+    test_secret_patterns()
+    test_secret_prose_not_flagged()
+    test_path_escapes()
+    test_refuses_home_and_root()
+    test_usage_errors()
+    test_default_out_is_next_to_spec()
+    test_subprocess_failures()
+    test_voice_url()
     test_warning_blocks_final()
     test_check_setup()
+    test_check_setup_units()
+    test_feature_probe_and_version()
+    test_install_json_stdout_is_pure_json()
     for ex in sorted((ROOT / "examples").glob("*.yaml")):
         name = "example_%s" % ex.stem
 
