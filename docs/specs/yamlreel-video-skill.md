@@ -83,8 +83,15 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
    fact-check anything simplified.
 
 ### 3.4 scripts/check_setup.py (stdlib only, runs on python3 >= 3.8 so it can report "too old")
-- CLI: `check_setup.py [--install] [--json]`. Locates yamlreel in order: `$YAMLREEL_BIN`, `yamlreel` on PATH,
-  `$YAMLREEL_VENV/bin/yamlreel` (default venv `~/.yamlreel/venv`).
+- CLI: `check_setup.py [--install] [--json]`. Candidates in order: `$YAMLREEL_BIN`, `$YAMLREEL_VENV/bin/yamlreel`
+  (default venv `~/.yamlreel/venv`), then `yamlreel` on PATH. The first candidate that is usable wins and unusable ones
+  are skipped (`find_yamlreel`, shared with render.py, so the approved binary is the one that renders). Usable means:
+  `--version` (15s timeout) runs, and a feature probe passes (`story --help`, `render --help` lists `--contact-frames`,
+  and `validate` accepts a spec using table, array, cta, stagger, transition, energy and music lofi), and the version is
+  in `>=0.3.0,<0.4` OR it is an unreleased build, i.e. older than 0.3.0 but passing the probe. A version >= 0.4 is
+  rejected even if the probe passes; the message names the supported range and says to downgrade or pin. Each binary is
+  assessed once per process (cache keyed by realpath, mtime and size). render.py reports "no usable yamlreel (wrong
+  version or missing features)" when candidates exist but none is usable, and "yamlreel not found" when there are none.
 - Checks, each printed `ok|fail <name>: <detail> [fix: <command>]`: Python >= 3.10 interpreter available (finds
   `python3.12/3.11/3.10/python3`); venv exists; `yamlreel --version` >= 0.3.0 and < 0.4; ffmpeg via `shutil.which` or the
   venv's `imageio_ffmpeg.get_ffmpeg_exe()`; DejaVu `DejaVuSans.ttf`, `DejaVuSans-Bold.ttf`, `DejaVuSansMono.ttf` found
@@ -102,9 +109,13 @@ compatibility: Python 3.10+, pip package yamlreel>=0.3.0,<0.4, DejaVu fonts; mac
 - Preflight (exit 2 on refusal, message says why): spec and out dir resolve inside the current working directory
   (or the skill's `examples/`); spec has no `TODO` outside comments; secret scan (`find_secret` in render.py: provider
   key prefixes such as `AKIA...`, `sk-`, `ghp_`, `xox`/`xapp-`, `hf_`, `npm_`, `SG.`, JWTs, `-----BEGIN`, Bearer tokens,
-  URL passwords, and keyword assignments `password|passwd|pwd|secret|token|api_key|private_key|access_key|auth` followed
-  by `:`/`=` and a value, with plain, escaped or doubled quotes; obvious placeholders such as `YOUR_KEY`, `<...>`, `xxx`,
-  `${VAR}` are exempt and hyphenated prose like `secret: rate-limiting` is not flagged);
+  URL passwords (empty user allowed), `Authorization: Basic <base64>`, and keyword assignments where the keyword
+  `password|passwd|secret|secret_key|token|api_key|private_key|access_key` ENDS the identifier (`client_secret`,
+  `GITHUB_TOKEN`, `SECRET_KEY` match; `token_bucket`, `password_hash`, `author`, `pwd_context` do not; bare `auth` and
+  `pwd` are not keywords) followed by `:`/`=` and a value, with plain, escaped or doubled quotes; quoted values may hold
+  spaces. Exempt: placeholders such as `YOUR_KEY`, `<...>`, `xxx`, `${VAR}`, `$ALLCAPS_VAR`, ALLCAPS_NAMES; a quoted
+  value equal to the keyword (`"password"`); a bare value that is code (contains any of `( ) [ ] { } ,` or `$(`) or
+  contains the keyword itself; hyphenated prose like `secret: rate-limiting`);
   `--voice-url` host must be `127.0.0.1`, `localhost` or `::1` over http(s) and must not contain `user:password@`. Without `--voice-url` every render gets
   `--no-voice`, so a remote `voice_server` in the user config is never used by the skill.
 - Steps: `yamlreel validate SPEC` (print its `ok:` line) -> `yamlreel render SPEC --preview --out OUT/preview

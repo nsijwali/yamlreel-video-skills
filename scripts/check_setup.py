@@ -206,10 +206,29 @@ class Assessment(NamedTuple):
     error: str
 
 
+VERSION_TIMEOUT = 15
+_ASSESS_CACHE: "dict[tuple, Assessment]" = {}
+
+
 def assess(ym: str) -> Assessment:
+    """Cached by real path (plus mtime and size) so one binary is probed once per process."""
+    try:
+        real = os.path.realpath(ym)
+        st = os.stat(real)
+        key: "tuple | None" = (real, st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    if key is None:
+        return _assess(ym)
+    if key not in _ASSESS_CACHE:
+        _ASSESS_CACHE[key] = _assess(ym)
+    return _ASSESS_CACHE[key]
+
+
+def _assess(ym: str) -> Assessment:
     """Version in range (or an unreleased build older than MIN_VERSION that has the features) and features present."""
     try:
-        r = subprocess.run([ym, "--version"], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([ym, "--version"], capture_output=True, text=True, timeout=VERSION_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as e:
         return Assessment(False, False, "", False, "version unknown", False, "cannot run %s: %s" % (ym, e))
     text = (r.stdout + r.stderr).strip()
@@ -269,7 +288,12 @@ def run_checks(preferred: "str | None" = None) -> "tuple[list[dict], str | None]
             detail = "%s at %s" % (a.text or "unknown version", ym)
             if a.unreleased:
                 detail += " (unreleased build: older than %s but has the required features)" % VERSION_SPEC
-            checks.append(check("yamlreel", usable, detail, UPGRADE_MSG + "   or: " + install_fix))
+            ver = parse_version(a.text)
+            fix = UPGRADE_MSG + "   or: " + install_fix
+            if ver is not None and ver >= MAX_EXCLUSIVE:
+                detail += " (newer than this skill supports: %s)" % VERSION_SPEC
+                fix = "downgrade or pin yamlreel to %s: pip install \"%s\"" % (VERSION_SPEC, PIN)
+            checks.append(check("yamlreel", usable, detail, fix))
     else:
         checks.append(check("yamlreel", False, "no usable yamlreel found (looked at $YAMLREEL_BIN, %s, PATH)" % venv_bin(venv, "yamlreel"), install_fix))
 

@@ -23,7 +23,7 @@ from urllib.parse import urlparse, urlunparse
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
-from check_setup import find_yamlreel  # noqa: E402
+from check_setup import candidates, find_yamlreel  # noqa: E402
 
 EXAMPLES_DIR = (SCRIPTS_DIR.parent / "examples").resolve()
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -31,8 +31,10 @@ FORMATS = ("vertical", "landscape", "square")
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
 # (label, regex, name of the group holding the secret value or None). A value that is an obvious placeholder
-# (YOUR_*, <...>, xxx, ..., ${VAR}, $VAR, ALLCAPS_NAME) is exempt, so "use a placeholder" guidance works.
-_KEYWORDS = r"(?P<kw>password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|auth)"
+# (YOUR_*, <...>, xxx, ..., ${VAR}, $ALLCAPS_VAR, ALLCAPS_NAME) is exempt, so "use a placeholder" guidance works.
+# The keyword must END the identifier (client_secret, SECRET_KEY, GITHUB_TOKEN match; token_bucket, password_hash do not).
+_KEYWORDS = (r"(?<![A-Za-z0-9])[\w-]*?(?P<kw>password|passwd|secret[_-]?key|secret|token|api[_-]?key|private[_-]?key"
+             r"|access[_-]?key)(?![A-Za-z0-9])")
 SECRET_PATTERNS = (
     ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}"), None),
     ("API secret key (sk-...)", re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}"), None),
@@ -47,23 +49,32 @@ SECRET_PATTERNS = (
     ("JWT", re.compile(r"eyJ[\w-]+\.eyJ[\w-]+"), None),
     ("private key block", re.compile(r"-----BEGIN"), None),
     ("bearer token", re.compile(r"Bearer\s+(?P<val>[A-Za-z0-9._~+/-]{16,})"), "val"),
-    ("password in a URL", re.compile(r"://[^/\s:@]+:(?P<val>[^/\s@]+)@"), "val"),
-    # keyword (optionally prefixed/suffixed, e.g. AWS_SECRET_ACCESS_KEY, "auth_header"), optional quotes (plain,
-    # escaped \" or doubled ''), then : or =, then either a quoted value (6+ chars, 4+ for passwords) or a bare one:
-    # passwords/pwd 4+ chars; others 8+ chars holding a digit or one of / + = (so "secret: rate-limiting" is prose).
+    ("basic auth credentials", re.compile(r"Authorization:\s*Basic\s+(?P<val>[A-Za-z0-9+/]{16,}={0,2})", re.I), "val"),
+    ("password in a URL", re.compile(r"://[^/\s:@]*:(?P<val>[^/\s@]+)@"), "val"),
+    # keyword ending an identifier, optional quotes (plain, escaped \" or doubled ''), then : or =, then either a quoted
+    # value (may hold spaces; 6+ chars, 4+ for passwords) or a bare one: passwords 4+ chars; others 8+ chars holding a
+    # digit or one of / + = (so "secret: rate-limiting" is prose).
     ("password/secret/token/api key assignment", re.compile(
-        _KEYWORDS + r"""[\w-]*\\?["']{0,2}\s*[:=]\s*"""
-        r"""(?:(?P<q>\\?["']{1,2})(?P<qv>[^\s"'\\]{4,})(?=\\?["'])|(?P<uv>[^\s"'\\]+))""", re.I), "assign"),
+        _KEYWORDS + r"""\\?["']{0,2}\s*[:=]\s*"""
+        r"""(?:(?P<q>\\?["']{1,2})(?P<qv>[^"'\\]{4,})(?=\\?["'])|(?P<uv>[^\s"'\\]+))""", re.I), "assign"),
 )
-PASSWORD_KEYWORDS = ("password", "passwd", "pwd")
+PASSWORD_KEYWORDS = ("password", "passwd")
 ALLCAPS_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
 USERINFO_RE = re.compile(r"(://)[^/\s@]+@")
+CODE_CHARS = "()[]{},"
+
+
+PLACEHOLDER_RE = re.compile(r"^(?:YOUR[_-].*|<.*|\$\{.*|x{3,}|\.{3}|\*{3,})$", re.I)
+ENV_VAR_RE = re.compile(r"^\$[A-Z_][A-Z0-9_]*$")  # case-sensitive: $hunter2 is not a variable reference
 
 
 def is_placeholder(value: str) -> bool:
-    if ALLCAPS_RE.match(value):
-        return True
-    return bool(re.match(r"^(?:YOUR[_-].*|<.*|\$\{.*|\$[A-Za-z_]\w*|x{3,}|\.{3}|\*{3,})$", value, re.I))
+    return bool(ALLCAPS_RE.match(value) or PLACEHOLDER_RE.match(value) or ENV_VAR_RE.match(value))
+
+
+def is_code_value(value: str, keyword: str) -> bool:
+    """A bare value that is an expression (call, index, interpolation) or names the keyword itself is code, not a secret."""
+    return any(c in value for c in CODE_CHARS) or "$(" in value or keyword.lower() in value.lower()
 
 
 def find_secret(line: str) -> "str | None":
@@ -75,12 +86,15 @@ def find_secret(line: str) -> "str | None":
             if group == "assign":
                 quoted = m.group("q") is not None
                 value = m.group("qv") if quoted else m.group("uv")
+                keyword = m.group("kw")
                 if is_placeholder(value):
                     continue
-                password = m.group("kw").lower() in PASSWORD_KEYWORDS
+                password = keyword.lower() in PASSWORD_KEYWORDS
                 if quoted:
-                    if len(value) >= (4 if password else 6):
+                    if value.lower() != keyword.lower() and len(value) >= (4 if password else 6):
                         return label
+                    continue
+                if is_code_value(value, keyword):
                     continue
                 if (password and len(value) >= 4) or (len(value) >= 8 and re.search(r"[0-9/+=]", value)):
                     return label
@@ -334,8 +348,12 @@ def main(argv: "list[str] | None" = None) -> int:
 
     ym = find_yamlreel()
     if not ym:
-        print("error: yamlreel not found; run scripts/check_setup.py", file=sys.stderr)
-        print(result_line(args.stage, False, ["yamlreel not found"], {}, None))
+        if candidates():
+            msg = "no usable yamlreel (wrong version or missing features)"
+        else:
+            msg = "yamlreel not found"
+        print("error: %s; run scripts/check_setup.py" % msg, file=sys.stderr)
+        print(result_line(args.stage, False, [msg], {}, None))
         return 1
 
     try:

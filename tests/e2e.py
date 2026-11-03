@@ -193,8 +193,12 @@ def secret_cases() -> "list[tuple[str, str]]":
         ("escaped quotes", 'password: \\"hunter2xyz\\"'),
         ("single quotes (doubled once embedded in YAML)", "password: 'hunter2xyz'"),
         ("OPENAI_API_KEY", "OPENAI_API_KEY=" + "abc123def456ghi789"),
-        ("pwd", "pwd=hunter2"),
-        ("auth", "auth: x9f8a7b6c5d4"),
+        ("client_secret", "client_secret: abc123def456"),
+        ("GITHUB_TOKEN", "GITHUB_TOKEN=abc123def456ghi"),
+        ("quoted value with spaces", 'password: "correct horse battery"'),
+        ("URL with empty user", "redis://:s3cr3tpw@cache.internal:6379/0"),
+        ("basic auth", "Authorization: Basic " + "dXNlcjpwYXNzd29yZDEyMzQ1"),
+        ("lowercase $var is not a reference", "password: $hunter2"),
         ("short password", "password: hunter2"),
         ("stripe test", "sk_test_" + "a1" * 6),
         ("huggingface", "hf_" + "aB3" * 11),
@@ -259,7 +263,7 @@ def test_secret_find_secret_direct() -> None:
 def test_secret_prose_not_flagged() -> None:
     prose = ["The token: refresh it", "Never share your secret: keep it safe", "disk-based caching of the layer-cache-key-x",
              "a password manager", "tokens: reused", "api key rotation: monthly", "sk-short", "secret: rate-limiting",
-             "Secret: hyphen-ated words are prose", "Bearer authentication", "the auth: layer", "token: refresh_flow"]
+             "Secret: hyphen-ated words are prose", "Bearer authentication", "the auth: layer", "token: refresh_flow", "auth: x9f8a7b6c5d4", "pwd=hunter2"]
     with tempfile.TemporaryDirectory() as proj:
         proj_p = Path(proj).resolve()
         for i, text in enumerate(prose):
@@ -269,6 +273,35 @@ def test_secret_prose_not_flagged() -> None:
                 render_mod.preflight(spec, proj_p / "out", None, proj_p)  # must pass: no exception at all
             except render_mod.Refused as e:
                 raise AssertionError("prose %r refused: %s" % (text, e))
+
+
+CODE_LINES = [
+    "password = getpass.getpass()", 'password = input("Password: ")', 'password = os.environ["DB_PASSWORD"]',
+    "authenticate(request, username=username, password=password)", "password=hashed_password",
+    "def check(password: str) -> bool:", "password: Optional[str] = None", 'password = "password"',
+    "pwd = os.getcwd()", "pwd=$(pwd)", 'pwd_context = CryptContext(schemes=["bcrypt"])',
+    "token_bucket = TokenBucket(capacity=10, refill_rate=5)", "token = tokenizer.encode(text)[0]",
+    "secret_number = random.randint(1, 100)", 'api_key_header = APIKeyHeader(name="X-API-Key")',
+    'auth_router = APIRouter(prefix="/auth")', 'token_url="/token"', 'password_hash: "bcrypt"',
+    'secret_sauce: "consistency"', 'author="Lovelace"', 'authority: "https://login.example.com/tenant"',
+    'authorizer = Authorizer(policy="admin")', "access_key = boto3.Session().get_credentials().access_key",
+]
+
+
+@case
+def test_secret_code_not_flagged() -> None:
+    for line in CODE_LINES:
+        assert not render_mod.find_secret(line), "code line flagged: %r" % line
+    block = "theme: midnight\nformats: [square]\nscenes:\n  - type: code\n    code: |\n" + "".join(
+        "      %s\n" % line for line in CODE_LINES)
+    with tempfile.TemporaryDirectory() as proj:
+        proj_p = Path(proj).resolve()
+        spec = proj_p / "code.yaml"
+        spec.write_text(block, encoding="utf-8")
+        try:
+            render_mod.preflight(spec, proj_p / "out", None, proj_p)
+        except render_mod.Refused as e:
+            raise AssertionError("code block refused: %s" % e)
 
 
 @case
@@ -356,9 +389,12 @@ def test_subprocess_failures() -> None:
         # find_yamlreel skips a binary it cannot run, so the CLI reports "not found" ...
         r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p,
                 env={"YAMLREEL_BIN": str(noexec), "YAMLREEL_VENV": str(proj_p / "novenv"), "PATH": path_without_yamlreel()})
+        assert r.returncode == 1 and "no usable yamlreel (wrong version or missing features)" in r.stderr, (r.returncode, r.stderr)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], proj_p,
+                env={"YAMLREEL_BIN": None, "YAMLREEL_VENV": str(proj_p / "novenv"), "PATH": path_without_yamlreel()})
         assert r.returncode == 1 and "yamlreel not found" in r.stderr, (r.returncode, r.stderr)
         assert result_of(r)["ok"] is False
-        # ... and run_yamlreel itself turns an OS error into a failed process.
+        # ... "not found" only when no candidate exists at all, and run_yamlreel itself turns an OS error into a failed process.
         done = render_mod.run_yamlreel([str(noexec), "validate", "x"], render_mod.Logger(None))
         assert done.returncode == 1 and "cannot run yamlreel" in done.stderr, done
         (proj_p / "afile").write_text("x", encoding="utf-8")
@@ -512,6 +548,15 @@ def test_assess_unreleased_build_branch() -> None:
         assert not a.usable and not a.runs, a
         a = check_setup.assess(str(dp / "does-not-exist"))
         assert not a.usable and a.error, a
+        # cached by real path: a symlink to an assessed binary is the same Assessment object
+        c = dp / "c"
+        link = dp / "c-link"
+        link.symlink_to(c)
+        assert check_setup.assess(str(link)) is check_setup.assess(str(c))
+        with patched_env(YAMLREEL_BIN=str(c), YAMLREEL_VENV=str(dp / "novenv"), PATH=path_without_yamlreel()):
+            checks, _ = check_setup.run_checks()
+        msg = [x for x in checks if x["name"] == "yamlreel"][0]
+        assert ">=0.3.0,<0.4" in msg["detail"] and "downgrade" in msg["fix"] and "pin" in msg["fix"], msg
 
 
 @case
@@ -548,6 +593,9 @@ def test_find_yamlreel_skips_unusable_and_orders() -> None:
         (dp / "good.yaml").write_text(GOOD_SPEC, encoding="utf-8")
         r = run([str(RENDER), "good.yaml", "--stage", "preview"], dp,
                 env={"YAMLREEL_BIN": None, "YAMLREEL_VENV": str(dp / "novenv"), "PATH": path})
+        assert r.returncode == 1 and "no usable yamlreel (wrong version or missing features)" in r.stderr, (r.returncode, r.stderr)
+        r = run([str(RENDER), "good.yaml", "--stage", "preview"], dp,
+                env={"YAMLREEL_BIN": None, "YAMLREEL_VENV": str(dp / "novenv"), "PATH": path_without_yamlreel()})
         assert r.returncode == 1 and "yamlreel not found" in r.stderr, (r.returncode, r.stderr)
 
 
@@ -615,6 +663,7 @@ def main() -> int:
     test_secret_patterns()
     test_secret_find_secret_direct()
     test_secret_prose_not_flagged()
+    test_secret_code_not_flagged()
     test_placeholder_spec_passes()
     test_path_escapes()
     test_refuses_home_and_root()
