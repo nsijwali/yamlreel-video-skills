@@ -33,6 +33,17 @@ DELIVERY NOTES
 - Recap in single words on screen long enough to read, state the caveat ("use it when the problem appears"), then ask
   the question and end right after it. Add "tell me in the comments" if you want replies.
 
+## Headlines, section tags and the end question
+- Give every beat a short headline of two beats that carry the idea ("Bursty in. Steady out.", "Watch. Scale. Slow the
+  intake."), so the idea survives with the sound off.
+- Number the beats with a small section tag above the headline ("01 / THE BURST", "05 / WHEN THE LINE KEEPS GROWING").
+  This is the `kicker` field on data scenes (`bullets`, `code`, `diagram`, `table`, `array`, `meter`, `grid`, `tree`,
+  `timeline`); it needs a yamlreel newer than 0.3.1. On older versions put the tag in the headline text instead.
+- Show a growing backlog, a filling cache or a draining budget with a `meter` bar so the viewer watches the number
+  climb, instead of stacking items over a label (stacked items can collide with the label above them).
+- End with a two-option question that is easy to answer in one word: a `cta` scene with two `answers` ("A short wait" or
+  "A timeout") is easier to answer in a comment than an open question.
+
 ## Cover and share copy
 - Cover (hook frame): thin inset frame; top row with the channel name left and a series tag ("TOPIC / 01") right over a
   hairline; a kicker in the accent colour; a three-line bold serif headline with the last word in the accent; the
