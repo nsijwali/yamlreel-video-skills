@@ -16,7 +16,10 @@ means the directory this file lives in.
    `--install` only after the user agrees. Never install fonts or system packages yourself.
 2. **Clarify** in ONE message, offering defaults: topic, audience, format (default vertical), length (default 30s),
    theme (`midnight|sumi|washi`), voice (default none). Skip anything the user already said.
-3. **Outline.** Write `videos/<slug>/outline.yaml` (topic, hook, problem, 1-6 steps each with `name`, `say`, `show`,
+3. **Script first.** Write `videos/<slug>/script.txt` in the beat format of `references/writing-guide.md` (target length,
+   one `[BEAT - input -> action -> result]` block per beat with its spoken line, then delivery notes) and show it to the user.
+   If they asked to review first, stop and wait for a go before drafting or rendering anything.
+   **Outline.** Then write `videos/<slug>/outline.yaml` (topic, hook, problem, 1-6 steps each with `name`, `say`, `show`,
    plus when_to_use, question, answers). Rules are in `references/writing-guide.md`: 15s = one idea; 30-45s = one idea plus up
    to 3 steps; at most 60s for #Shorts.
 4. **Draft:** `yamlreel story videos/<slug>/outline.yaml --out videos/<slug>/spec.yaml --format <fmt> --theme <t>`.
