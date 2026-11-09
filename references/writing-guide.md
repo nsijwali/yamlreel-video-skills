@@ -38,7 +38,7 @@ DELIVERY NOTES
   intake."), so the idea survives with the sound off.
 - Number the beats with a small section tag above the headline ("01 / THE BURST", "05 / WHEN THE LINE KEEPS GROWING").
   This is the `kicker` field on data scenes (`bullets`, `code`, `diagram`, `table`, `array`, `meter`, `grid`, `tree`,
-  `timeline`); it needs a yamlreel newer than 0.3.1. On older versions put the tag in the headline text instead.
+  `timeline`); it needs yamlreel 0.3.2 or newer. On older versions put the tag in the headline text instead.
 - Show a growing backlog, a filling cache or a draining budget with a `meter` bar so the viewer watches the number
   climb, instead of stacking items over a label (stacked items can collide with the label above them).
 - End with a two-option question that is easy to answer in one word: a `cta` scene with two `answers` ("A short wait" or
