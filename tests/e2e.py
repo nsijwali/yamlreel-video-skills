@@ -67,7 +67,7 @@ def patched_env(**changes):
                 os.environ[k] = v
 
 
-def fake_yamlreel(path: Path, version: str = "0.3.1", story: bool = True, contact: bool = True, validate: bool = True,
+def fake_yamlreel(path: Path, version: str = "0.3.2", story: bool = True, contact: bool = True, validate: bool = True,
                   slow: bool = False) -> Path:
     """A shell stand-in for yamlreel. slow=True makes real validate/render calls sleep (probe calls still pass)."""
     lines = ["#!/bin/sh", 'case "$1" in']
@@ -470,7 +470,7 @@ def test_check_setup() -> None:
 
 @case
 def test_check_setup_units() -> None:
-    assert VERSION_SPEC == ">=0.3.1,<0.4", VERSION_SPEC
+    assert VERSION_SPEC == ">=0.3.2,<0.4", VERSION_SPEC
     assert check_setup.PIN == "yamlreel[ffmpeg]" + VERSION_SPEC
     with tempfile.TemporaryDirectory() as d:
         old = os.environ.get("YAMLREEL_FONT_DIR")
@@ -556,7 +556,7 @@ def test_assess_unreleased_build_branch() -> None:
         with patched_env(YAMLREEL_BIN=str(c), YAMLREEL_VENV=str(dp / "novenv"), PATH=path_without_yamlreel()):
             checks, _ = check_setup.run_checks()
         msg = [x for x in checks if x["name"] == "yamlreel"][0]
-        assert ">=0.3.1,<0.4" in msg["detail"] and "downgrade" in msg["fix"] and "pin" in msg["fix"], msg
+        assert ">=0.3.2,<0.4" in msg["detail"] and "downgrade" in msg["fix"] and "pin" in msg["fix"], msg
 
 
 @case

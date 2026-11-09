@@ -24,8 +24,8 @@ MIN_PY = (3, 10)
 # The yamlreel version this skill needs. The single source of truth: --install, the version check, SKILL.md,
 # README.md (tests/e2e.py asserts both quote VERSION_SPEC) and CI all derive from these two constants.
 # 0.3.0 added `story`, --contact-frames, table/array/cta, stagger/count, transition/energy and music styles;
-# 0.3.1 is the first release with the meter, tree and timeline scenes. Keep the CI pin (YAMLREEL_SPEC) and the two doc strings in sync when this changes.
-MIN_VERSION = (0, 3, 1)
+# 0.3.1 added the meter, tree and timeline scenes; 0.3.2 is the first release with the grid scene and `kicker`. Keep the CI pin (YAMLREEL_SPEC) and the two doc strings in sync when this changes.
+MIN_VERSION = (0, 3, 2)
 MAX_EXCLUSIVE = (0, 4, 0)
 VERSION_SPEC = ">=%s,<%d.%d" % (".".join(map(str, MIN_VERSION)), MAX_EXCLUSIVE[0], MAX_EXCLUSIVE[1])
 PIN = "yamlreel[ffmpeg]" + VERSION_SPEC

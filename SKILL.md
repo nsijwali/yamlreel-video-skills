@@ -2,7 +2,7 @@
 name: yamlreel-video-skills
 description: Turn a topic into a finished short video (YouTube Shorts, Reels, TikTok vertical, landscape or square) without a video editor, by writing a YAML spec and rendering it locally with the open-source yamlreel CLI. Use when the user asks to make, script or render a short video, explainer, code tip, system-design video, or project/product launch video, or mentions yamlreel. Outputs an MP4, poster, contact sheet and ready-to-paste share copy. Not for editing existing footage.
 license: MIT
-compatibility: Python 3.10+, pip package yamlreel>=0.3.1,<0.4 (needs the `story` command and `render --contact-frames`), DejaVu fonts; macOS or Linux.
+compatibility: Python 3.10+, pip package yamlreel>=0.3.2,<0.4 (needs the `story` command and `render --contact-frames`), DejaVu fonts; macOS or Linux.
 ---
 
 # yamlreel-video-skills
