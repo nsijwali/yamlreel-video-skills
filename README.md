@@ -58,7 +58,7 @@ error or timeout, 2 preflight refused, 3 preview warnings block the final render
 | `SKILL.md` | agent instructions and frontmatter |
 | `scripts/check_setup.py` | environment check, optional install, smoke render |
 | `scripts/render.py` | preflight (no TODOs, secrets or remote voice URLs; refuses home and `/`), validate, preview, final render |
-| `references/` | scene types, writing guide, troubleshooting, optional voiceover |
+| `references/` | scene types, writing guide, troubleshooting, optional voiceover, optional polish (audit, sound effects) |
 | `examples/` | system-design explainer, code tip, product launch (all render with `--no-voice`) |
 | `tests/e2e.py` | renders every example, validates every snippet, checks preflight and hygiene |
 

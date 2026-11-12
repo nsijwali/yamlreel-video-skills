@@ -33,7 +33,9 @@ means the directory this file lives in.
    no overlap, no clipped or shrunk text, reveals progress across the stills, hook readable in the first still. Fix
    the spec and repeat step 6 until clean, at most 3 loops.
 8. **Final:** `python3 <skill>/scripts/render.py videos/<slug>/spec.yaml --stage final --out videos/<slug>/out`.
-9. **Report** the paths to each `video.mp4`, `poster.jpg` and `contact.png`, and paste the `share-copy.txt` contents.
+9. **Optional polish.** If the user wants sound effects, a loudness fix or a loop check, and `yamlreel audit --help`
+   works, follow `references/polish.md` on the finished `video.mp4` (it never touches the spec).
+10. **Report** the paths to each `video.mp4`, `poster.jpg` and `contact.png`, and paste the `share-copy.txt` contents.
    Remind the user to fact-check anything simplified. Publishing is the user's job.
 
 `render.py` exit codes: 0 ok, 1 yamlreel error (stderr echoed), 2 preflight refused (message says why), 3 preview
